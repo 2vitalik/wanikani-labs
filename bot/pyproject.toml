@@ -1,0 +1,23 @@
+[project]
+name = "wklabs-bot"
+version = "0.0.0"
+description = "wanikani-labs Telegram bot: poller (APScheduler) + forum-topic digests"
+requires-python = ">=3.12"
+dependencies = [
+    "wklabs-lib",
+    "aiogram>=3.15",
+    "apscheduler>=3.10,<4",
+]
+
+[project.scripts]
+wklabs-bot = "wklabs.bot.__main__:main"
+
+[tool.uv.sources]
+wklabs-lib = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wklabs"]

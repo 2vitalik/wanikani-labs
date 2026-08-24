@@ -1,0 +1,9 @@
+{
+  "include": ["lib/src", "cli/src", "bot/src", "web/src", "lib/tests", "bot/tests"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "standard",
+  "reportMissingImports": "error",
+  "reportMissingTypeStubs": "warning"
+}

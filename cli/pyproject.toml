@@ -1,0 +1,22 @@
+[project]
+name = "wklabs-cli"
+version = "0.0.0"
+description = "wanikani-labs CLI: sync, status, import-files, rebuild-events"
+requires-python = ">=3.12"
+dependencies = [
+    "wklabs-lib",
+    "typer>=0.12",
+]
+
+[project.scripts]
+wklabs = "wklabs.cli.main:app"
+
+[tool.uv.sources]
+wklabs-lib = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wklabs"]

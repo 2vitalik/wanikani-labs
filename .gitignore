@@ -1,0 +1,26 @@
+# Витяги сесій — похідний артефакт (регенерується extract.py), синк через Dropbox
+.dev/.sessions/
+# Драфти промптів та ideas-inbox — сирий голос, не для історії (T95)
+.dev/.drafts/
+
+# Python / uv
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Node (vue/)
+node_modules/
+vue/dist/
+
+# Project
+.env
+.idea/
+.DS_Store
+logs/
+data/
+.tmp/

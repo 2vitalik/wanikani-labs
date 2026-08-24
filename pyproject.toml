@@ -1,0 +1,50 @@
+[project]
+name = "wanikani-labs"
+version = "0.0.0"
+description = "WaniKani data collector, Telegram bot and stats (monorepo)"
+requires-python = ">=3.12"
+dependencies = [
+    "wklabs-lib",
+    "wklabs-cli",
+    "wklabs-bot",
+    "wklabs-web",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+wklabs-lib = { workspace = true }
+wklabs-cli = { workspace = true }
+wklabs-bot = { workspace = true }
+wklabs-web = { workspace = true }
+
+[tool.uv.workspace]
+members = ["lib", "cli", "bot", "web"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "pyright>=1.1.380",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["lib/src", "cli/src", "bot/src", "web/src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    "fastapi.Body", "fastapi.Form", "fastapi.Query", "fastapi.Depends",
+    "typer.Option", "typer.Argument",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["lib/tests", "cli/tests", "bot/tests", "web/tests"]
+addopts = "-ra --strict-markers --import-mode=importlib"
+asyncio_mode = "auto"

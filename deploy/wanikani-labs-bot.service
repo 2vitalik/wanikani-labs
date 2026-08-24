@@ -1,0 +1,32 @@
+# /etc/systemd/system/wanikani-labs-bot.service
+# Template per vps-infra (T20 bot unit). Bot = long polling, no port, no disk writes.
+[Unit]
+Description=wanikani-labs bot (WaniKani poller + Telegram digests, aiogram)
+After=network-online.target mongod.service
+Wants=network-online.target mongod.service
+
+[Service]
+User=app-wanikani-labs
+Group=app-wanikani-labs
+WorkingDirectory=/srv/wanikani-labs/repo
+EnvironmentFile=/srv/wanikani-labs/shared/env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/srv/wanikani-labs/venv/bin/wklabs-bot
+Restart=always
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Sandbox — same set as s-labs / nure-msg-bot
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryMax=384M
+
+[Install]
+WantedBy=multi-user.target
