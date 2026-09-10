@@ -24,6 +24,13 @@ sudo install -m 640 -o root -g app-$S /dev/null /srv/$S/shared/env
 
 `deploy/env.example` → `/srv/wanikani-labs/shared/env` (заповнити токени; `TG_ADMIN_IDS` — через кому).
 
+Юніт читає цей файл двічі: `EnvironmentFile=` (змінні процесу) і `Environment=WKLABS_ENV_FILE=…` (той самий файл для pydantic-settings) — як `NURE_ENV_FILE` у nure-students. `.env` у `repo/` на сервері немає й не треба. CLI на сервері — з тим самим перемикачем:
+
+```sh
+sudo WKLABS_ENV_FILE=/srv/wanikani-labs/shared/env \
+  /srv/wanikani-labs/venv/bin/wklabs status
+```
+
 ## 4. Код і venv
 
 Deploy key read-only у `shared/.ssh/`, `git init -b main` + `remote add` + `fetch` + `reset --hard` (не `clone`, щоб права на `repo/` лишились). Далі:

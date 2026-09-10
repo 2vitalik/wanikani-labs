@@ -1,5 +1,6 @@
 # CHANGELOG — що й коли міняли (новіше вгорі)
 
+- `2026-09-10` — env-файл: `REPO_ROOT` рахував `parents[4]` = `packages/`, тож `.env` знаходився лише через fallback на cwd (з іншої теки — `~/.env`, і на сервері теж); тепер як у nure-students/nure-timetable: `ENV_FILE = $WKLABS_ENV_FILE або <корінь репо>/.env`, без пошуку по cwd. Юніт у `deploy/` вирівняно з vps-infra T42 (`Environment=WKLABS_ENV_FILE=…`, `RestartSec=15s`); у runbook §3 — CLI на сервері з тим самим перемикачем.
 - `2026-09-10` — імпорт історії з файлів у локальну Mongo виконано й звірено — [T08](.t/T08-C--import-history.md): 319 263 файли → 172 983 версії, `rebuild-events` → 101 271 подія; `importer.py` — сортований обхід, `source_mtime`, надійний прогрес-лог; тест `test_importer.py`. З чату: `fetch_smart`→Mongo вже зроблено 08-23 (`SyncEngine`), з `kanji/` нічого брати; `_old_data.zip` (mochi, 2024-04) не імпортуємо.
 - `2026-09-10` — бачення бота: фічі, режими, пропозиція черговості — [T07](.t/T07-P--bot-vision.md); з чату: пілот для Vitalik, multi-user закладати від початку, write-фічі (ревʼю/уроки через бота) — наприкінці.
 - `2026-09-10` — конвенція комітів погоджена ([T06](.t/T06-R--commit-convention-answers.md)) і зафіксована глобально (`# git` у Shared CLAUDE.md) + рядки в `.dev/README.md` і `CLAUDE.md`; з чату: у суфіксі лише тікети, чиї файли є в коміті.

@@ -12,7 +12,7 @@
 - Код/ідентифікатори/коментарі — EN; документація й спілкування — UA.
 - Коміти робить лише Vitalik (агент — на явне прохання). Формат — глобальна конвенція (`# git` у `/Users/Shared/.claude/CLAUDE.md`): `<type>[(scope)]: <summary>, tNN[-MM][,KK]`, заголовок ≤ 72, деталі списком у тілі, у суфіксі лише тікети, які коміт створює/змінює — пропозиція [T04](.t/T04-P--commit-convention.md), рішення [T06](.t/T06-R--commit-convention-answers.md).
 - Стек: Python ≥3.12, PyMongo native async (не motor), httpx, pydantic-settings, aiogram 3, APScheduler 3, typer, FastAPI; ruff + pyright + pytest (тести — на реальній локальній Mongo, БД `wanikani_labs_test`).
-- Секрети — `.env` (git-ignored) локально, `shared/env` на сервері; акаунти WK — `WK_TOKEN__<KEY>`.
+- Секрети — `.env` (git-ignored) локально, `shared/env` на сервері; шлях до файлу — `WKLABS_ENV_FILE`, дефолт `.env` у корені репо незалежно від cwd (як `NURE_ENV_FILE` у nure-students); акаунти WK — `WK_TOKEN__<KEY>`.
 - Проєкт №10 у реєстрі портів DEV.md.
 
 ## Вузли

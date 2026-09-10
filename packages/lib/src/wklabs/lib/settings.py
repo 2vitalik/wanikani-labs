@@ -1,4 +1,4 @@
-"""Process settings: env vars win, then `.env` (repo root or $WKLABS_ENV_FILE).
+"""Process settings: env vars win, then the `.env` file ($WKLABS_ENV_FILE or repo root).
 
 Accounts are declared as `WK_TOKEN__<KEY>=<token>`; the key (lower-cased)
 becomes the account name used everywhere (`main`, `light`, ...).
@@ -14,22 +14,14 @@ from typing import Annotated
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-
-
-def _env_file() -> Path | None:
-    explicit = os.environ.get("WKLABS_ENV_FILE")
-    if explicit:
-        return Path(explicit)
-    for candidate in (REPO_ROOT / ".env", Path.cwd() / ".env"):
-        if candidate.is_file():
-            return candidate
-    return None
+# packages/lib/src/wklabs/lib/settings.py -> repo root
+REPO_ROOT = Path(__file__).resolve().parents[5]
+ENV_FILE = Path(os.environ.get("WKLABS_ENV_FILE", REPO_ROOT / ".env"))
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=_env_file(),
+        env_file=ENV_FILE,
         env_file_encoding="utf-8",
         env_nested_delimiter="__",
         extra="ignore",

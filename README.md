@@ -14,6 +14,7 @@
 ```bash
 uv sync                         # venv + усі підпроєкти (editable)
 cp .env.example .env            # WK_TOKEN__MAIN=…, WK_TOKEN__LIGHT=…, (BOT_TOKEN, TG_FORUM_CHAT_ID, TG_ADMIN_IDS)
+                                # .env береться з кореня репо незалежно від cwd; інший файл — WKLABS_ENV_FILE=/шлях
 uv run wklabs accounts          # що сконфігуровано
 uv run wklabs sync              # перший запуск = baseline (~20 с, ~50 запитів); далі — інкрементально (~3 с)
 uv run wklabs status

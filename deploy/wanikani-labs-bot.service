@@ -11,9 +11,10 @@ Group=app-wanikani-labs
 WorkingDirectory=/srv/wanikani-labs/repo
 EnvironmentFile=/srv/wanikani-labs/shared/env
 Environment=PYTHONUNBUFFERED=1
+Environment=WKLABS_ENV_FILE=/srv/wanikani-labs/shared/env
 ExecStart=/srv/wanikani-labs/venv/bin/wklabs-bot
 Restart=always
-RestartSec=5s
+RestartSec=15s
 KillSignal=SIGTERM
 TimeoutStopSec=30
 
