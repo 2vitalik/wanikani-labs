@@ -4,6 +4,8 @@
 
 Метод — жива спека: `/Users/v4u/Dropbox/v4/Dev/My/dev-md-rules/APPROACH.md` (компактний шар DEV.md — у кожній сесії). Реєстр тікетів — [MAP.md](MAP.md), дерево вузлів — [TREE.md](TREE.md), журнал — [CHANGELOG.md](CHANGELOG.md), голос проєкту — [STATUS.md](STATUS.md).
 
+Бачення бота (фон, не план) — [T07](.t/T07-P--bot-vision.md): сесії / денні підсумки / стріки, сповіщення про контент, нагадування, ревʼю й уроки через бота, статистика à la wkstats, multi-account / multi-user; там же — пропозиція черговості кроків.
+
 ## Конвенції
 
 - Репо = uv-workspace монорепо, namespace `wklabs`; підпроєкти — під `packages/` ([T03](.t/T03-C--packages-layout.md)): `lib/` (ядро) · `cli/` (`wklabs`) · `bot/` (`wklabs-bot`) · `web/` (`wklabs-web`, порт 8100) · `vue/` (фаза 3, порт 5100); поза пакетами — `deploy/` (юніт, env-шаблон, runbook), `scripts/`. Дизайн і чому саме так: [T01](.t/T01-P--architecture-v1.md) (дерево там — до T03), стартові рішення: [T02](.t/T02-R--decisions-2026-08-23.md).

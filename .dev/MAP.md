@@ -2,7 +2,7 @@
 
 <!-- автоген: `dev map` (або `dev gen`), руками не редагувати -->
 
-Наступний вільний ID: **T07** · тікетів: 6 · дерево вузлів — [TREE.md](TREE.md)
+Наступний вільний ID: **T08** · тікетів: 7 · дерево вузлів — [TREE.md](TREE.md)
 
 Типи: `Q`❓ питання · `P`💡 пропозиція · `C`🔆 clarification · `B`🧠 brainstorm · `R`✔️ readback · `S`📝 summary · `D`🗄️ digest (на пенсії) · ⚙️ задача (тека, без літери). state: 🟢/🔴 — чи чекає твоєї відповіді · 🟩/⬜ — чи інтегровано в README вузла.
 
@@ -14,3 +14,4 @@
 | — | [T04](.t/T04-P--commit-convention.md) | 💡 | commit-convention | Конвенція комітів: Conventional Commits + суфікс тікетів | 🟢 ⬜ |
 | — | [T05](.t/T05-Q--commit-convention.md) | ❓ | commit-convention | Питання до конвенції комітів | 🔴 ⬜ |
 | — | [T06](.t/T06-R--commit-convention-answers.md) | ✔️ | commit-convention-answers | Readback: відповіді на T05 (конвенція комітів) | 🟢 ⬜ |
+| — | [T07](.t/T07-P--bot-vision.md) | 💡 | bot-vision | Бачення бота: продукт, фічі, режими (фон дорожньої карти) | 🟢 ⬜ |
