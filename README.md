@@ -4,10 +4,10 @@
 
 | Підпроєкт | Пакет | Що |
 |---|---|---|
-| `lib/` | `wklabs.lib` | settings · Mongo (PyMongo async) · WaniKani API client · sync engine · events · importer |
-| `cli/` | `wklabs.cli` → `wklabs` | `sync` · `status` · `import-files` · `rebuild-events` · `accounts` |
-| `bot/` | `wklabs.bot` → `wklabs-bot` | aiogram 3 + APScheduler (поллер у процесі) · топіки форуму · дайджести · `/status` `/sync` |
-| `web/` | `wklabs.web` → `wklabs-web` | FastAPI (`/api/health`, `/api/status`), порт **8100**; `vue/` — фаза 3 (порт 5100) |
+| `packages/lib/` | `wklabs.lib` | settings · Mongo (PyMongo async) · WaniKani API client · sync engine · events · importer |
+| `packages/cli/` | `wklabs.cli` → `wklabs` | `sync` · `status` · `import-files` · `rebuild-events` · `accounts` |
+| `packages/bot/` | `wklabs.bot` → `wklabs-bot` | aiogram 3 + APScheduler (поллер у процесі) · топіки форуму · дайджести · `/status` `/sync` |
+| `packages/web/` | `wklabs.web` → `wklabs-web` | FastAPI (`/api/health`, `/api/status`), порт **8100**; `packages/vue/` — фаза 3 (порт 5100) |
 
 ## Швидкий старт (локально)
 
@@ -28,7 +28,7 @@ uv run ruff check . && uv run ruff format --check . && uv run pyright
 - **Polling.** Кожні `SYNC_INTERVAL` с (5 хв) по кожному акаунту: `user`, `summary`, `level_progressions`, `assignments`, `review_statistics`, `study_materials`, `resets` — з `updated_after` (1 дешевий запит на endpoint; `user`/`summary` — через ETag). Раз на `SUBJECTS_INTERVAL` (год) — глобальні `subjects`, `spaced_repetition_systems`, `voice_actors`.
 - **Зберігання.** Сирий обʼєкт API — незмінним у полі `item`; зверху підняті типізовані поля для індексів. Колекції поточного стану по ресурсу + `history` (append-only всі версії, unique на `(resource, account, resource_id, data_updated_at)`) + `events` (похідні: `reviewed`, `srs_up/down`, `unlocked`, `started`, `passed`, `burned`, `level_*`, `subject_updated`…; перебудовуються з `history` командою `rebuild-events`).
 - **Baseline.** Перший sync акаунта/ресурсу лише записує версії — подій і сповіщень нема. Далі кожен полл → події → **один дайджест на акаунт на топік**.
-- **Топіки форуму** (бот створює сам, памʼятає в `tg_topics`): `📝 <acc> · reviews`, `🏆 <acc> · milestones`, `📚 subjects`, `🛠 system`. Маршрутизація подій — `bot/src/wklabs/bot/routing.py`.
+- **Топіки форуму** (бот створює сам, памʼятає в `tg_topics`): `📝 <acc> · reviews`, `🏆 <acc> · milestones`, `📚 subjects`, `🛠 system`. Маршрутизація подій — `packages/bot/src/wklabs/bot/routing.py`.
 - **Історія 2022–2026** зі старого файлового скрапера: `uv run wklabs import-files ~/Giga/data/wanikani` → `history`, потім `uv run wklabs rebuild-events`.
 
 ## Сервер (vv3)

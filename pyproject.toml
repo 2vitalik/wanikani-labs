@@ -20,7 +20,7 @@ wklabs-bot = { workspace = true }
 wklabs-web = { workspace = true }
 
 [tool.uv.workspace]
-members = ["lib", "cli", "bot", "web"]
+members = ["packages/*"]
 
 [dependency-groups]
 dev = [
@@ -33,7 +33,7 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["lib/src", "cli/src", "bot/src", "web/src"]
+src = ["packages/*/src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
@@ -45,6 +45,6 @@ extend-immutable-calls = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["lib/tests", "cli/tests", "bot/tests", "web/tests"]
+testpaths = ["packages"]
 addopts = "-ra --strict-markers --import-mode=importlib"
 asyncio_mode = "auto"

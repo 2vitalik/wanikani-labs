@@ -15,7 +15,7 @@ dist/
 
 # Node (vue/)
 node_modules/
-vue/dist/
+packages/vue/dist/
 
 # Project
 .env

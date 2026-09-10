@@ -1026,10 +1026,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "wklabs-bot", editable = "bot" },
-    { name = "wklabs-cli", editable = "cli" },
-    { name = "wklabs-lib", editable = "lib" },
-    { name = "wklabs-web", editable = "web" },
+    { name = "wklabs-bot", editable = "packages/bot" },
+    { name = "wklabs-cli", editable = "packages/cli" },
+    { name = "wklabs-lib", editable = "packages/lib" },
+    { name = "wklabs-web", editable = "packages/web" },
 ]
 
 [package.metadata.requires-dev]
@@ -1043,7 +1043,7 @@ dev = [
 [[package]]
 name = "wklabs-bot"
 version = "0.0.0"
-source = { editable = "bot" }
+source = { editable = "packages/bot" }
 dependencies = [
     { name = "aiogram" },
     { name = "apscheduler" },
@@ -1054,13 +1054,13 @@ dependencies = [
 requires-dist = [
     { name = "aiogram", specifier = ">=3.15" },
     { name = "apscheduler", specifier = ">=3.10,<4" },
-    { name = "wklabs-lib", editable = "lib" },
+    { name = "wklabs-lib", editable = "packages/lib" },
 ]
 
 [[package]]
 name = "wklabs-cli"
 version = "0.0.0"
-source = { editable = "cli" }
+source = { editable = "packages/cli" }
 dependencies = [
     { name = "typer" },
     { name = "wklabs-lib" },
@@ -1069,13 +1069,13 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "typer", specifier = ">=0.12" },
-    { name = "wklabs-lib", editable = "lib" },
+    { name = "wklabs-lib", editable = "packages/lib" },
 ]
 
 [[package]]
 name = "wklabs-lib"
 version = "0.0.0"
-source = { editable = "lib" }
+source = { editable = "packages/lib" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
@@ -1094,7 +1094,7 @@ requires-dist = [
 [[package]]
 name = "wklabs-web"
 version = "0.0.0"
-source = { editable = "web" }
+source = { editable = "packages/web" }
 dependencies = [
     { name = "fastapi" },
     { name = "uvicorn" },
@@ -1105,7 +1105,7 @@ dependencies = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "uvicorn", specifier = ">=0.30" },
-    { name = "wklabs-lib", editable = "lib" },
+    { name = "wklabs-lib", editable = "packages/lib" },
 ]
 
 [[package]]
