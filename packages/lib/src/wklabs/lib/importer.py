@@ -4,6 +4,10 @@ Layout: `<root>/account_<acc>/<type>/<NNxx>/<id>/{info,assign,review}.json`
 (latest) and `<root>/.../<id>/<YYYY-MM>/<cat>__<date>__<time>.json` (versions).
 Every file is a full WaniKani object with `data_updated_at`, so all of them go
 to `history` (unique on version; duplicates skipped). Run `rebuild-events` after.
+
+The file name carries `data_updated_at`, not the fetch time; the file mtime is
+the closest thing to it, so it is kept raw as `source_mtime` (unreliable for
+files rewritten by later restructures — never used as `fetched_at`).
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ import json
 import logging
 import re
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,15 +32,16 @@ log = logging.getLogger(__name__)
 CATEGORY_TO_RESOURCE = {"info": "subjects", "assign": "assignments", "review": "review_statistics"}
 _MONTH = re.compile(r"^\d{4}-\d{2}$")
 _SNAP = re.compile(r"^(info|assign|review)__\d{4}-\d{2}-\d{2}__\d{2}-\d{2}-\d{2}$")
+_PROGRESS_EVERY = 20  # flushes
 
 
 def iter_files(root: Path) -> Iterator[tuple[str, str, Path]]:
-    """Yield (account, category, path) for every snapshot/latest file."""
+    """Yield (account, category, path) for every snapshot/latest file, sorted."""
     for account_dir in sorted(root.iterdir()):
         if not account_dir.is_dir() or not account_dir.name.startswith("account_"):
             continue
         account = account_dir.name.removeprefix("account_")
-        for path in account_dir.rglob("*.json"):
+        for path in sorted(account_dir.rglob("*.json")):
             stem = path.stem
             if stem in CATEGORY_TO_RESOURCE:
                 yield account, stem, path
@@ -51,8 +57,10 @@ async def import_files(
     counts = {"files": 0, "inserted": 0, "duplicates": 0, "bad": 0}
     imported_at = utcnow()
     buf: list[dict[str, Any]] = []
+    flushes = 0
 
     async def flush() -> None:
+        nonlocal flushes
         if not buf:
             return
         try:
@@ -66,6 +74,9 @@ async def import_files(
             if len(errs) != dups:
                 log.error("import: %d non-duplicate write errors", len(errs) - dups)
         buf.clear()
+        flushes += 1
+        if flushes % _PROGRESS_EVERY == 0:
+            log.info("import: %(files)d files, %(inserted)d inserted, %(duplicates)d dup", counts)
 
     for account, category, path in iter_files(root):
         if accounts and account not in accounts:
@@ -79,6 +90,7 @@ async def import_files(
             continue
         if not isinstance(item, dict) or "data_updated_at" not in item or "id" not in item:
             counts["bad"] += 1
+            log.warning("import: not a WaniKani object: %s", path)
             continue
         res = RESOURCES[CATEGORY_TO_RESOURCE[category]]
         h = history_doc(
@@ -92,13 +104,10 @@ async def import_files(
         )
         h["imported_at"] = imported_at
         h["source_file"] = str(path.relative_to(root))
+        h["source_mtime"] = datetime.fromtimestamp(path.stat().st_mtime, UTC)
         buf.append(h)
         if len(buf) >= batch:
             await flush()
-            if counts["files"] % 20000 == 0:
-                log.info(
-                    "import: %(files)d files, %(inserted)d inserted, %(duplicates)d dup", counts
-                )
     await flush()
     log.info("import done: %s", counts)
     return counts

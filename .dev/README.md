@@ -23,9 +23,11 @@
 
 - ✅ v1 зібрано й перевірено локально: baseline-sync обох акаунтів (23 840 обʼєктів, 18 с, 52 запити), інкрементальний — 3 с; бот у dry-run поллить; 14 тестів, ruff/pyright чисті.
 - ⬜ Деплой на vv3 — [deploy/README.md](../deploy/README.md); потрібні від тебе `BOT_TOKEN`, `TG_FORUM_CHAT_ID`, `TG_ADMIN_IDS`.
-- ⬜ Імпорт історії з `~/Giga/data/wanikani` + `rebuild-events` (фаза 3 плану T01).
+- ✅ Історія з файлів імпортована локально й звірена до одиниці ([T08](.t/T08-C--import-history.md)): 319 263 файли → 172 983 версії за 1.5 хв, `rebuild-events` → 101 271 подія за 7 с; `fetch_smart`→Mongo вже було зроблено 08-23 (`SyncEngine`), з `kanji/` брати нічого; 16 тестів.
+- ⬜ Перенести `history` на vv3 (`mongodump`/`mongorestore`, ~93 MB на диску) + `rebuild-events` там — [deploy/README.md](../deploy/README.md) §8; після деплою бота.
 - ⬜ Web + Vue (статистика).
 
 ## Наступний крок
 
 - Ти: відповіді `>` у T01/T02 (якщо є правки), токен бота + chat_id форуму → `.env` → локально `uv run wklabs-bot` з реальним Telegram → потім деплой за runbook.
+- Далі за деплоєм — історія на сервер (§8 runbook); локальна Mongo `kanji` більше не потрібна (дроп — на твій розсуд).
