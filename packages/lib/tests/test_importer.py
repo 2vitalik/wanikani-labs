@@ -93,6 +93,14 @@ def _tree(root: Path) -> None:
     (root / "not_an_account").mkdir()
 
 
+def test_iter_files_account_map(tmp_path):
+    _tree(tmp_path)
+    (tmp_path / "account_main").rename(tmp_path / "account_1")
+    accounts = {a for a, _, _ in iter_files(tmp_path, {"1": "main"})}
+    assert accounts == {"main", "light"}
+    assert {a for a, _, _ in iter_files(tmp_path)} == {"1", "light"}
+
+
 def test_iter_files_picks_only_known_names(tmp_path):
     _tree(tmp_path)
     paths = [p for _, _, p in iter_files(tmp_path)]

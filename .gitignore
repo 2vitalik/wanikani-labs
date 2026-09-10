@@ -24,3 +24,5 @@ packages/vue/dist/
 logs/
 data/
 .tmp/
+# Mongo dumps for the server (runbook §8)
+/history*.gz

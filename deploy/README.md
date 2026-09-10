@@ -72,4 +72,32 @@ sudo systemctl restart wanikani-labs-bot
 
 ## 8. Історія (разово)
 
-Імпорт з `~/Giga/data/wanikani` зроблено локально 2026-09-10 (T08): `history` = 204 479 док. (з `_old_data.zip`, T10 крок 3), ~0.5 GB даних / ~0.1 GB на диску (WiredTiger). Переносити **лише** `history` — чому: T11. Далі — `mongodump --db wanikani_labs --collection history` → `mongorestore` на vv3 (через ssh-тунель), далі `wklabs rebuild-events -y` на сервері. Або rsync файлів (1.6 GB) і `wklabs import-files` там — диск 17 GB вільних, але перший варіант ощадніший.
+Імпорт з `~/Giga/data/wanikani` зроблено локально 2026-09-10 (T08): `history` = 218 704 док. (файли до 2026-09-10 + `_old_data.zip`; T13), ~0.5 GB даних / ~0.12 GB на диску (WiredTiger). Переносити **лише** `history` — чому: T11. Порядок: відновити **до** першого старту бота, потім `rebuild-events -y`, потім `enable --now`.
+
+Локально:
+
+```sh
+mongodump --db wanikani_labs --collection history --gzip \
+  --archive=history.gz && scp history.gz vv3:/tmp/
+```
+
+На vv3 — пароль не набирати й не світити в історії/`ps`: URI вже лежить у `shared/env`, mongorestore читає його з root-only YAML (`--config`), файл одразу shred:
+
+```sh
+sudo sh -c 'umask 077; printf "uri: %s\n" \
+  "$(grep ^MONGO_URI= /srv/wanikani-labs/shared/env | cut -d= -f2-)" \
+  > /root/restore.yml'
+sudo mongorestore --config /root/restore.yml --gzip \
+  --archive=/tmp/history.gz --nsInclude wanikani_labs.history
+sudo shred -u /root/restore.yml /tmp/history.gz
+sudo WKLABS_ENV_FILE=/srv/wanikani-labs/shared/env \
+  /srv/wanikani-labs/venv/bin/wklabs rebuild-events -y
+```
+
+Запасний варіант без файлу — mongorestore сам спитає пароль, якщо дати `--username` без `--password`:
+
+```sh
+mongorestore --host 127.0.0.1 --username wanikani_labs \
+  --authenticationDatabase wanikani_labs --gzip \
+  --archive=/tmp/history.gz --nsInclude wanikani_labs.history
+``` Далі — `mongodump --db wanikani_labs --collection history` → `mongorestore` на vv3 (через ssh-тунель), далі `wklabs rebuild-events -y` на сервері. Або rsync файлів (1.6 GB) і `wklabs import-files` там — диск 17 GB вільних, але перший варіант ощадніший.

@@ -2,7 +2,7 @@
 
 <!-- автоген: `dev map` (або `dev gen`), руками не редагувати -->
 
-Наступний вільний ID: **T13** · тікетів: 12 · дерево вузлів — [TREE.md](TREE.md)
+Наступний вільний ID: **T14** · тікетів: 13 · дерево вузлів — [TREE.md](TREE.md)
 
 Типи: `Q`❓ питання · `P`💡 пропозиція · `C`🔆 clarification · `B`🧠 brainstorm · `R`✔️ readback · `S`📝 summary · `D`🗄️ digest (на пенсії) · ⚙️ задача (тека, без літери). state: 🟢/🔴 — чи чекає твоєї відповіді · 🟩/⬜ — чи інтегровано в README вузла.
 
@@ -20,3 +20,4 @@
 | — | [T10](.t/T10-P--full-data-plan.md) | 💡 | full-data-plan | План «повні дані»: старий сервер → файли → Mongo, якість і перевірки | 🟢 ⬜ |
 | — | [T11](.t/T11-C--clean-slate-vs-append.md) | 🔆 | clean-slate-vs-append | Чистий лист чи доповнення локальної бази перед дампом на сервер | 🟢 ⬜ |
 | — | [T12](.t/T12-R--old-server-answers.md) | ✔️ | old-server-answers | Readback: відповіді на T09 (vv1, сам виконуєш, окрема тека, cron ще 1–2 тижні) | 🟢 ⬜ |
+| — | [T13](.t/T13-C--server-tail-import.md) | 🔆 | server-tail-import | Хвіст з vv1: порівняння дерев, мапа акаунтів, доімпорт, розклад cron | 🟢 ⬜ |

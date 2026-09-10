@@ -86,12 +86,19 @@ class HistoryWriter:
             )
 
 
-def iter_files(root: Path) -> Iterator[tuple[str, str, Path]]:
-    """Yield (account, category, path) for every snapshot/latest file, sorted."""
+def iter_files(
+    root: Path, account_map: dict[str, str] | None = None
+) -> Iterator[tuple[str, str, Path]]:
+    """Yield (account, category, path) for every snapshot/latest file, sorted.
+
+    `account_map` renames dir keys (the server writes `account_1`/`account_2`
+    after the token keys; our accounts are `main`/`light`).
+    """
     for account_dir in sorted(root.iterdir()):
         if not account_dir.is_dir() or not account_dir.name.startswith("account_"):
             continue
-        account = account_dir.name.removeprefix("account_")
+        key = account_dir.name.removeprefix("account_")
+        account = (account_map or {}).get(key, key)
         for path in sorted(account_dir.rglob("*.json")):
             stem = path.stem
             if stem in CATEGORY_TO_RESOURCE:
@@ -103,10 +110,15 @@ def iter_files(root: Path) -> Iterator[tuple[str, str, Path]]:
 
 
 async def import_files(
-    db: Db, root: Path, *, batch: int = 1000, accounts: list[str] | None = None
+    db: Db,
+    root: Path,
+    *,
+    batch: int = 1000,
+    accounts: list[str] | None = None,
+    account_map: dict[str, str] | None = None,
 ) -> dict[str, int]:
     w = HistoryWriter(db, batch=batch)
-    for account, category, path in iter_files(root):
+    for account, category, path in iter_files(root, account_map):
         if accounts and account not in accounts:
             continue
         w.counts["files"] += 1

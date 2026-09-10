@@ -114,13 +114,19 @@ def status() -> None:
 @app.command("import-files")
 def import_files(
     root: Path = typer.Argument(..., exists=True, file_okay=False, resolve_path=True),
-    account: list[str] = typer.Option([], "--account", "-a"),
+    account: list[str] = typer.Option([], "--account", "-a", help="Limit to account(s)."),
+    account_map: str = typer.Option(
+        "", "--account-map", help="Rename dir keys: `1=main,2=light` for account_1/account_2."
+    ),
 ) -> None:
     """Import old file snapshots (account_<acc>/<type>/<NNxx>/<id>/...) into history."""
     from wklabs.lib.importer import import_files as _import
+    from wklabs.lib.importer_raw import parse_account_map
 
     async def go(db: Db) -> None:
-        counts = await _import(db, root, accounts=account or None)
+        counts = await _import(
+            db, root, accounts=account or None, account_map=parse_account_map(account_map)
+        )
         typer.echo(counts)
 
     _run(go)
