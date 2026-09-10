@@ -8,7 +8,7 @@
 
 - Репо = uv-workspace монорепо, namespace `wklabs`; підпроєкти — під `packages/` ([T03](.t/T03-C--packages-layout.md)): `lib/` (ядро) · `cli/` (`wklabs`) · `bot/` (`wklabs-bot`) · `web/` (`wklabs-web`, порт 8100) · `vue/` (фаза 3, порт 5100); поза пакетами — `deploy/` (юніт, env-шаблон, runbook), `scripts/`. Дизайн і чому саме так: [T01](.t/T01-P--architecture-v1.md) (дерево там — до T03), стартові рішення: [T02](.t/T02-R--decisions-2026-08-23.md).
 - Код/ідентифікатори/коментарі — EN; документація й спілкування — UA.
-- Коміти робить лише Vitalik (агент — на явне прохання). Формат — `<type>[(scope)]: <summary>, tNN[-NN]` (Conventional Commits, заголовок ≤ 72, деталі списком у тілі): [T04](.t/T04-P--commit-convention.md); погодження — [T05](.t/T05-Q--commit-convention.md).
+- Коміти робить лише Vitalik (агент — на явне прохання). Формат — глобальна конвенція (`# git` у `/Users/Shared/.claude/CLAUDE.md`): `<type>[(scope)]: <summary>, tNN[-MM][,KK]`, заголовок ≤ 72, деталі списком у тілі, у суфіксі лише тікети, які коміт створює/змінює — пропозиція [T04](.t/T04-P--commit-convention.md), рішення [T06](.t/T06-R--commit-convention-answers.md).
 - Стек: Python ≥3.12, PyMongo native async (не motor), httpx, pydantic-settings, aiogram 3, APScheduler 3, typer, FastAPI; ruff + pyright + pytest (тести — на реальній локальній Mongo, БД `wanikani_labs_test`).
 - Секрети — `.env` (git-ignored) локально, `shared/env` на сервері; акаунти WK — `WK_TOKEN__<KEY>`.
 - Проєкт №10 у реєстрі портів DEV.md.
@@ -26,4 +26,4 @@
 
 ## Наступний крок
 
-- Ти: `>` у [T05](.t/T05-Q--commit-convention.md) (конвенція комітів) і в T01/T02 (якщо є правки), токен бота + chat_id форуму → `.env` → локально `uv run wklabs-bot` з реальним Telegram → потім деплой за runbook.
+- Ти: відповіді `>` у T01/T02 (якщо є правки), токен бота + chat_id форуму → `.env` → локально `uv run wklabs-bot` з реальним Telegram → потім деплой за runbook.
