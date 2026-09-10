@@ -22,7 +22,7 @@ from wklabs.lib.settings import get_settings
 from wklabs.lib.sync import SyncEngine
 
 from .context import AppContext
-from .handlers import router
+from .handlers import public, router
 from .notifier import Notifier
 from .scheduler import build_scheduler
 from .topics import TopicManager
@@ -79,10 +79,12 @@ async def run() -> None:
             await stop.wait()
         else:
             dp = Dispatcher()
+            dp.include_router(public)
             dp.include_router(router)
             dp["ctx"] = ctx
             await bot.set_my_commands(
                 [
+                    BotCommand(command="start", description="am I alive? shows your id"),
                     BotCommand(command="status", description="last sync, levels, reviews due"),
                     BotCommand(command="sync", description="poll now"),
                     BotCommand(command="sync_full", description="full refetch"),

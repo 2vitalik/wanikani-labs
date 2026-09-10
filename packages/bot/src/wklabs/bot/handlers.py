@@ -1,4 +1,4 @@
-"""Admin commands: /status /sync /topics /help."""
+"""Bot commands: public /start /ping (alive + your id); admin /status /sync /topics /help."""
 
 from __future__ import annotations
 
@@ -10,10 +10,11 @@ from aiogram.filters import BaseFilter, Command
 from aiogram.types import Message
 
 from .context import AppContext
-from .status_text import status_text
+from .status_text import alive_text, status_text
 
 log = logging.getLogger(__name__)
-router = Router(name="wklabs")
+public = Router(name="wklabs-public")  # answers anyone: liveness + "your id" for TG_ADMIN_IDS
+router = Router(name="wklabs")  # admin-only
 
 
 class IsAdmin(BaseFilter):
@@ -27,6 +28,13 @@ class IsAdmin(BaseFilter):
 
 router.message.filter(IsAdmin())
 
+
+@public.message(Command("start", "ping"))
+async def cmd_start(message: Message, ctx: AppContext) -> None:
+    uid = message.from_user.id if message.from_user else None
+    await message.answer(await alive_text(ctx, uid))
+
+
 HELP = (
     "<b>wanikani-labs bot</b>\n"
     "/status — last sync, levels, SRS, reviews due\n"
@@ -37,7 +45,7 @@ HELP = (
 )
 
 
-@router.message(Command("start", "help"))
+@router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
     await message.answer(HELP)
 

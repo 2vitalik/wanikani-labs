@@ -1,4 +1,4 @@
-"""Text blocks for /status and the daily heartbeat (Telegram HTML)."""
+"""Text blocks for /start, /status and the daily heartbeat (Telegram HTML)."""
 
 from __future__ import annotations
 
@@ -55,6 +55,31 @@ async def status_text(ctx: AppContext) -> str:
         f"poll every {ctx.settings.sync_interval}s"
         + (" · <i>dry-run</i>" if ctx.notifier.dry_run else "")
     )
+    return "\n".join(lines)
+
+
+async def alive_text(ctx: AppContext, user_id: int | None) -> str:
+    """/start, /ping — for anyone: proves the bot is alive and shows the caller's id."""
+    tz = ZoneInfo(ctx.settings.tz)
+    last = await ctx.db.sync_runs.find_one({}, sort=[("started_at", -1)])
+    if last:
+        age = int((utcnow() - last["started_at"]).total_seconds() // 60)
+        ok = "✅" if last["ok"] else "❌"
+        sync = f"last sync {_fmt_dt(last['started_at'], tz)} ({age} min ago) {ok}"
+    else:
+        sync = "no sync runs yet"
+    up = timedelta(seconds=int((utcnow() - ctx.started_at).total_seconds()))
+    is_admin = user_id is not None and user_id in ctx.settings.tg_admin_ids
+    lines = [
+        f"👋 <b>wanikani-labs</b> alive · uptime {up!s} · poll every {ctx.settings.sync_interval}s",
+        sync,
+        f"your id: <code>{user_id}</code> · "
+        + (
+            "admin — /status /sync /help"
+            if is_admin
+            else "not in TG_ADMIN_IDS (admin commands ignored)"
+        ),
+    ]
     return "\n".join(lines)
 
 

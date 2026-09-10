@@ -57,6 +57,8 @@ sudo etckeeper commit "systemd: add wanikani-labs-bot.service"
 
 ## 6. Перевірка
 
+- `/start` (або `/ping`) у приваті з ботом чи в будь-якому топіку відповідає **будь-кому**: аптайм, час останнього sync і твій Telegram id. Якщо в рядку стоїть `not in TG_ADMIN_IDS` — саме цей id треба дописати в `shared/env` → `TG_ADMIN_IDS` і `systemctl restart wanikani-labs-bot`.
+- Адмін-команди від чужого id бот мовчки ігнорує: `journalctl -u wanikani-labs-bot | grep 'ignored command'` показує, хто стукав. Якщо бот не відповідає нікому — шукати в журналі `TelegramConflictError` (той самий токен поллить ще один процес, напр. локальний `uv run wklabs-bot`).
 - У форумі зʼявились 6 топіків; `/status` у будь-якому топіку від адміна відповідає.
 - Після перших ревʼю в WaniKani — дайджест у `📝 <acc> · reviews` протягом 5 хв.
 
@@ -72,7 +74,7 @@ sudo systemctl restart wanikani-labs-bot
 
 ## 8. Історія (разово)
 
-Імпорт з `~/Giga/data/wanikani` зроблено локально 2026-09-10 (T08): `history` = 218 704 док. (файли до 2026-09-10 + `_old_data.zip`; T13), ~0.5 GB даних / ~0.12 GB на диску (WiredTiger). Переносити **лише** `history` — чому: T11. Порядок: відновити **до** першого старту бота, потім `rebuild-events -y`, потім `enable --now`.
+Імпорт з `~/Giga/data/wanikani` зроблено локально 2026-09-10 (T08): `history` = 218 704 док. (файли до 2026-09-10 + `_old_data.zip`; T13), ~0.5 GB даних / ~0.12 GB на диску (WiredTiger). Переносити **лише** `history` — чому: T11. Порядок: краще відновити **до** першого старту бота, потім `rebuild-events -y`, потім `enable --now`. Якщо бот уже стартував — теж нормально: mongorestore напише `continuing through error: E11000 duplicate key` на кожну версію, яку бот уже зібрав сам (2026-09-11 на vv3: 194 771 відновлено, 23 933 дублікатів — сума = весь локальний `history`); зміст не страждає, далі так само `rebuild-events -y` (він позначає всі події як надіслані — старих дайджестів у Telegram не буде).
 
 Локально:
 
