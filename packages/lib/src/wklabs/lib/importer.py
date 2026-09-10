@@ -34,6 +34,57 @@ _MONTH = re.compile(r"^\d{4}-\d{2}$")
 _SNAP = re.compile(r"^(info|assign|review)__\d{4}-\d{2}-\d{2}__\d{2}-\d{2}-\d{2}$")
 _PROGRESS_EVERY = 20  # flushes
 
+Json = dict[str, Any]
+
+
+class HistoryWriter:
+    """Batched inserts into `history`; duplicate versions (unique index) are counted, not errors."""
+
+    def __init__(self, db: Db, *, batch: int = 1000) -> None:
+        self.db = db
+        self.batch = batch
+        self.imported_at = utcnow()
+        self.counts = {"files": 0, "inserted": 0, "duplicates": 0, "bad": 0}
+        self._buf: list[Json] = []
+        self._flushes = 0
+
+    def add(
+        self, resource_name: str, account: str | None, item: Json, source: Path, root: Path
+    ) -> None:
+        h = history_doc(
+            RESOURCES[resource_name],
+            account,
+            item,
+            fetched_at=None,
+            run_kind="import",
+            run_id=None,
+            prev_data_updated_at=None,
+        )
+        h["imported_at"] = self.imported_at
+        h["source_file"] = str(source.relative_to(root))
+        h["source_mtime"] = datetime.fromtimestamp(source.stat().st_mtime, UTC)
+        self._buf.append(h)
+
+    async def flush(self, *, force: bool = True) -> None:
+        if not self._buf or (not force and len(self._buf) < self.batch):
+            return
+        try:
+            r = await self.db.history.insert_many(self._buf, ordered=False)
+            self.counts["inserted"] += len(r.inserted_ids)
+        except BulkWriteError as exc:
+            errs = exc.details.get("writeErrors", [])
+            dups = sum(1 for e in errs if e.get("code") == 11000)
+            self.counts["duplicates"] += dups
+            self.counts["inserted"] += len(self._buf) - len(errs)
+            if len(errs) != dups:
+                log.error("import: %d non-duplicate write errors", len(errs) - dups)
+        self._buf.clear()
+        self._flushes += 1
+        if self._flushes % _PROGRESS_EVERY == 0:
+            log.info(
+                "import: %(files)d files, %(inserted)d inserted, %(duplicates)d dup", self.counts
+            )
+
 
 def iter_files(root: Path) -> Iterator[tuple[str, str, Path]]:
     """Yield (account, category, path) for every snapshot/latest file, sorted."""
@@ -54,60 +105,23 @@ def iter_files(root: Path) -> Iterator[tuple[str, str, Path]]:
 async def import_files(
     db: Db, root: Path, *, batch: int = 1000, accounts: list[str] | None = None
 ) -> dict[str, int]:
-    counts = {"files": 0, "inserted": 0, "duplicates": 0, "bad": 0}
-    imported_at = utcnow()
-    buf: list[dict[str, Any]] = []
-    flushes = 0
-
-    async def flush() -> None:
-        nonlocal flushes
-        if not buf:
-            return
-        try:
-            r = await db.history.insert_many(buf, ordered=False)
-            counts["inserted"] += len(r.inserted_ids)
-        except BulkWriteError as exc:
-            errs = exc.details.get("writeErrors", [])
-            dups = sum(1 for e in errs if e.get("code") == 11000)
-            counts["duplicates"] += dups
-            counts["inserted"] += len(buf) - len(errs)
-            if len(errs) != dups:
-                log.error("import: %d non-duplicate write errors", len(errs) - dups)
-        buf.clear()
-        flushes += 1
-        if flushes % _PROGRESS_EVERY == 0:
-            log.info("import: %(files)d files, %(inserted)d inserted, %(duplicates)d dup", counts)
-
+    w = HistoryWriter(db, batch=batch)
     for account, category, path in iter_files(root):
         if accounts and account not in accounts:
             continue
-        counts["files"] += 1
+        w.counts["files"] += 1
         try:
             item = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            counts["bad"] += 1
+            w.counts["bad"] += 1
             log.warning("import: bad file %s: %s", path, exc)
             continue
         if not isinstance(item, dict) or "data_updated_at" not in item or "id" not in item:
-            counts["bad"] += 1
+            w.counts["bad"] += 1
             log.warning("import: not a WaniKani object: %s", path)
             continue
-        res = RESOURCES[CATEGORY_TO_RESOURCE[category]]
-        h = history_doc(
-            res,
-            account,
-            item,
-            fetched_at=None,
-            run_kind="import",
-            run_id=None,
-            prev_data_updated_at=None,
-        )
-        h["imported_at"] = imported_at
-        h["source_file"] = str(path.relative_to(root))
-        h["source_mtime"] = datetime.fromtimestamp(path.stat().st_mtime, UTC)
-        buf.append(h)
-        if len(buf) >= batch:
-            await flush()
-    await flush()
-    log.info("import done: %s", counts)
-    return counts
+        w.add(CATEGORY_TO_RESOURCE[category], account, item, path, root)
+        await w.flush(force=False)
+    await w.flush()
+    log.info("import done: %s", w.counts)
+    return w.counts

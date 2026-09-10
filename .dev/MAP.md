@@ -2,7 +2,7 @@
 
 <!-- автоген: `dev map` (або `dev gen`), руками не редагувати -->
 
-Наступний вільний ID: **T11** · тікетів: 10 · дерево вузлів — [TREE.md](TREE.md)
+Наступний вільний ID: **T13** · тікетів: 12 · дерево вузлів — [TREE.md](TREE.md)
 
 Типи: `Q`❓ питання · `P`💡 пропозиція · `C`🔆 clarification · `B`🧠 brainstorm · `R`✔️ readback · `S`📝 summary · `D`🗄️ digest (на пенсії) · ⚙️ задача (тека, без літери). state: 🟢/🔴 — чи чекає твоєї відповіді · 🟩/⬜ — чи інтегровано в README вузла.
 
@@ -16,5 +16,7 @@
 | — | [T06](.t/T06-R--commit-convention-answers.md) | ✔️ | commit-convention-answers | Readback: відповіді на T05 (конвенція комітів) | 🟢 ⬜ |
 | — | [T07](.t/T07-P--bot-vision.md) | 💡 | bot-vision | Бачення бота: продукт, фічі, режими (фон дорожньої карти) | 🟢 ⬜ |
 | — | [T08](.t/T08-C--import-history.md) | 🔆 | import-history | Імпорт історії з файлів у Mongo: що вже є, прогін локально | 🟢 ⬜ |
-| — | [T09](.t/T09-Q--old-server-data.md) | ❓ | old-server-data | Питання: старий сервер, доступ, rsync, вимкнення cron | 🔴 ⬜ |
+| — | [T09](.t/T09-Q--old-server-data.md) | ❓ | old-server-data | Питання: старий сервер, доступ, rsync, вимкнення cron | 🟢 ⬜ |
 | — | [T10](.t/T10-P--full-data-plan.md) | 💡 | full-data-plan | План «повні дані»: старий сервер → файли → Mongo, якість і перевірки | 🟢 ⬜ |
+| — | [T11](.t/T11-C--clean-slate-vs-append.md) | 🔆 | clean-slate-vs-append | Чистий лист чи доповнення локальної бази перед дампом на сервер | 🟢 ⬜ |
+| — | [T12](.t/T12-R--old-server-answers.md) | ✔️ | old-server-answers | Readback: відповіді на T09 (vv1, сам виконуєш, окрема тека, cron ще 1–2 тижні) | 🟢 ⬜ |

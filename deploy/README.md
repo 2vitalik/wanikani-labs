@@ -72,4 +72,4 @@ sudo systemctl restart wanikani-labs-bot
 
 ## 8. Історія (разово)
 
-Імпорт з `~/Giga/data/wanikani` зроблено локально 2026-09-10 (T08): `history` = 196 823 док., ~455 MB даних / ~93 MB на диску (WiredTiger), індекси ~72 MB. Далі — `mongodump --db wanikani_labs --collection history` → `mongorestore` на vv3 (через ssh-тунель), далі `wklabs rebuild-events -y` на сервері. Або rsync файлів (1.6 GB) і `wklabs import-files` там — диск 17 GB вільних, але перший варіант ощадніший.
+Імпорт з `~/Giga/data/wanikani` зроблено локально 2026-09-10 (T08): `history` = 204 479 док. (з `_old_data.zip`, T10 крок 3), ~0.5 GB даних / ~0.1 GB на диску (WiredTiger). Переносити **лише** `history` — чому: T11. Далі — `mongodump --db wanikani_labs --collection history` → `mongorestore` на vv3 (через ssh-тунель), далі `wklabs rebuild-events -y` на сервері. Або rsync файлів (1.6 GB) і `wklabs import-files` там — диск 17 GB вільних, але перший варіант ощадніший.

@@ -1,4 +1,4 @@
-"""`wklabs` — data operations: sync, status, import-files, rebuild-events."""
+"""`wklabs` — data operations: sync, status, import-files, import-raw, rebuild-events."""
 
 from __future__ import annotations
 
@@ -121,6 +121,29 @@ def import_files(
 
     async def go(db: Db) -> None:
         counts = await _import(db, root, accounts=account or None)
+        typer.echo(counts)
+
+    _run(go)
+
+
+@app.command("import-raw")
+def import_raw(
+    root: Path = typer.Argument(..., exists=True, file_okay=False, resolve_path=True),
+    account_map: str = typer.Option(
+        "data1=main,data2=light", "--account-map", help="<dir>=<account>,... for data<N>/ dumps."
+    ),
+    default_account: str = typer.Option(
+        "main", "--default-account", help="Account for per-account objects under data.v1/."
+    ),
+) -> None:
+    """Import pre-restructure raw dumps (data<N>-MM_DD/<endpoint>/raw, data.v1/) into history."""
+    from wklabs.lib.importer_raw import import_raw as _import
+    from wklabs.lib.importer_raw import parse_account_map
+
+    async def go(db: Db) -> None:
+        counts = await _import(
+            db, root, account_map=parse_account_map(account_map), default_account=default_account
+        )
         typer.echo(counts)
 
     _run(go)
