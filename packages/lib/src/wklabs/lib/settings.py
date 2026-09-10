@@ -79,6 +79,11 @@ class Settings(BaseSettings):
 
     @property
     def tg_enabled(self) -> bool:
+        """Telegram polling (commands) — token is enough; digests also need the forum."""
+        return bool(self.bot_token)
+
+    @property
+    def forum_enabled(self) -> bool:
         return bool(self.bot_token and self.tg_forum_chat_id)
 
 

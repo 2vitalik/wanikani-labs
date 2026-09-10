@@ -2,7 +2,8 @@
 
 Start order (journald-greppable): ping Mongo → indexes → bot → topics →
 scheduler (first global+account sync within seconds) → polling.
-Without BOT_TOKEN/TG_FORUM_CHAT_ID runs in dry-run: polls, logs digests.
+Without BOT_TOKEN: dry-run (polls, logs digests). With a token but no
+TG_FORUM_CHAT_ID: bootstrap — answers /start (chat/thread/user ids), logs digests.
 """
 
 from __future__ import annotations
@@ -44,8 +45,13 @@ async def run() -> None:
     bot: Bot | None = None
     if settings.tg_enabled:
         bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        if not settings.forum_enabled:
+            log.warning(
+                "TG_FORUM_CHAT_ID not set → bootstrap mode: /start answers (shows chat id), "
+                "digests go to the log"
+            )
     else:
-        log.warning("BOT_TOKEN/TG_FORUM_CHAT_ID not set → dry-run (digests go to the log)")
+        log.warning("BOT_TOKEN not set → dry-run (no Telegram at all, digests go to the log)")
 
     engine = SyncEngine(db, settings.wk_token)
     topics = TopicManager(db, settings.tg_forum_chat_id, settings.accounts)

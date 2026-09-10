@@ -32,7 +32,7 @@ router.message.filter(IsAdmin())
 @public.message(Command("start", "ping"))
 async def cmd_start(message: Message, ctx: AppContext) -> None:
     uid = message.from_user.id if message.from_user else None
-    await message.answer(await alive_text(ctx, uid))
+    await message.answer(await alive_text(ctx, uid, message.chat.id, message.message_thread_id))
 
 
 HELP = (

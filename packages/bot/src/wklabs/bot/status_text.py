@@ -58,8 +58,10 @@ async def status_text(ctx: AppContext) -> str:
     return "\n".join(lines)
 
 
-async def alive_text(ctx: AppContext, user_id: int | None) -> str:
-    """/start, /ping — for anyone: proves the bot is alive and shows the caller's id."""
+async def alive_text(
+    ctx: AppContext, user_id: int | None, chat_id: int | None = None, thread_id: int | None = None
+) -> str:
+    """/start, /ping — for anyone: proves the bot is alive; shows the ids needed for the env."""
     tz = ZoneInfo(ctx.settings.tz)
     last = await ctx.db.sync_runs.find_one({}, sort=[("started_at", -1)])
     if last:
@@ -80,6 +82,17 @@ async def alive_text(ctx: AppContext, user_id: int | None) -> str:
             else "not in TG_ADMIN_IDS (admin commands ignored)"
         ),
     ]
+    if chat_id is not None and chat_id != user_id:
+        here = f"chat id: <code>{chat_id}</code>"
+        if thread_id is not None:
+            here += f" · thread {thread_id}"
+        if not ctx.settings.forum_enabled:
+            here += " → put it into TG_FORUM_CHAT_ID"
+        elif chat_id != ctx.settings.tg_forum_chat_id:
+            here += " (not the configured forum)"
+        lines.append(here)
+    elif not ctx.settings.forum_enabled:
+        lines.append("TG_FORUM_CHAT_ID not set → send /start inside the forum to get its chat id")
     return "\n".join(lines)
 
 

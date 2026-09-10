@@ -24,6 +24,19 @@ sudo install -m 640 -o root -g app-$S /dev/null /srv/$S/shared/env
 
 `deploy/env.example` → `/srv/wanikani-labs/shared/env` (заповнити токени; `TG_ADMIN_IDS` — через кому).
 
+Без `BOT_TOKEN` бот працює в dry-run: полить WaniKani, але до Telegram не підключається взагалі й на команди не відповідає. Bootstrap у три кроки:
+
+1. `BOT_TOKEN` від @BotFather → `systemctl restart wanikani-labs-bot` (журнал: `bootstrap mode`).
+2. Додати бота у форум адміном (з правом Manage Topics) і написати `/start` у будь-якому топіку: відповідь містить `chat id: -100…` і `your id: …`.
+3. Вписати їх у `TG_FORUM_CHAT_ID` і `TG_ADMIN_IDS` → `restart`. У журналі має бути `forum topics ready`.
+
+Перевірити, що заповнено (довжини значень, без самих значень):
+
+```sh
+sudo awk -F= '/^(BOT_TOKEN|TG_FORUM_CHAT_ID|TG_ADMIN_IDS)=/ {print $1, length($2)}' \
+  /srv/wanikani-labs/shared/env
+```
+
 Юніт читає цей файл двічі: `EnvironmentFile=` (змінні процесу) і `Environment=WKLABS_ENV_FILE=…` (той самий файл для pydantic-settings) — як `NURE_ENV_FILE` у nure-students. `.env` у `repo/` на сервері немає й не треба. CLI на сервері — з тим самим перемикачем:
 
 ```sh
@@ -53,7 +66,7 @@ journalctl -u wanikani-labs-bot -f
 sudo etckeeper commit "systemd: add wanikani-labs-bot.service"
 ```
 
-Очікуване в журналі: `MongoDB connected` → `forum topics ready` → `scheduler started` → `polling as @…` → через ~2 с `sync incremental done … (baseline)` → через ~20 с акаунти.
+Очікуване в журналі (`sudo journalctl -u wanikani-labs-bot -n 50 --no-pager` — без `sudo` системні юніти не видно): `MongoDB connected` → `forum topics ready` → `scheduler started` → `polling as @…` → через ~2 с `sync incremental done … (baseline)` → через ~20 с акаунти. Якщо замість `polling as` є `dry-run` — порожній `BOT_TOKEN` (§3).
 
 ## 6. Перевірка
 

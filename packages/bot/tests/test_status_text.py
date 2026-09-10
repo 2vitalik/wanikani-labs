@@ -35,3 +35,14 @@ async def test_alive_text_non_admin_and_admin(db):
     text = await alive_text(_ctx(db, [42]), 42)
     assert "(7 min ago) ✅" in text and "admin — /status" in text
     assert "not in TG_ADMIN_IDS" not in text
+
+
+async def test_alive_text_shows_chat_id_for_bootstrap(db):
+    ctx = _ctx(db, [42])
+    private = await alive_text(ctx, 42, 42, None)
+    assert "TG_FORUM_CHAT_ID not set" in private and "chat id: <code>" not in private
+    forum = await alive_text(ctx, 42, -1001234, 7)
+    assert "chat id: <code>-1001234</code> · thread 7 → put it into TG_FORUM_CHAT_ID" in forum
+    ctx.settings = Settings(tg_admin_ids=[42], bot_token="x", tg_forum_chat_id=-1001234)
+    assert "→ put it" not in await alive_text(ctx, 42, -1001234, 7)
+    assert "(not the configured forum)" in await alive_text(ctx, 42, -1009999, None)
