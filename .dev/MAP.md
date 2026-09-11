@@ -2,7 +2,7 @@
 
 <!-- автоген: `dev map` (або `dev gen`), руками не редагувати -->
 
-Наступний вільний ID: **T14** · тікетів: 13 · дерево вузлів — [TREE.md](TREE.md)
+Наступний вільний ID: **T19** · тікетів: 18 · дерево вузлів — [TREE.md](TREE.md)
 
 Типи: `Q`❓ питання · `P`💡 пропозиція · `C`🔆 clarification · `B`🧠 brainstorm · `R`✔️ readback · `S`📝 summary · `D`🗄️ digest (на пенсії) · ⚙️ задача (тека, без літери). state: 🟢/🔴 — чи чекає твоєї відповіді · 🟩/⬜ — чи інтегровано в README вузла.
 
@@ -21,3 +21,8 @@
 | — | [T11](.t/T11-C--clean-slate-vs-append.md) | 🔆 | clean-slate-vs-append | Чистий лист чи доповнення локальної бази перед дампом на сервер | 🟢 ⬜ |
 | — | [T12](.t/T12-R--old-server-answers.md) | ✔️ | old-server-answers | Readback: відповіді на T09 (vv1, сам виконуєш, окрема тека, cron ще 1–2 тижні) | 🟢 ⬜ |
 | — | [T13](.t/T13-C--server-tail-import.md) | 🔆 | server-tail-import | Хвіст з vv1: порівняння дерев, мапа акаунтів, доімпорт, розклад cron | 🟢 ⬜ |
+| — | [T14](.t/T14-P--accounts-model.md) | 💡 | accounts-model | Акаунти в Mongo: модель, схема, міграція, безпека токенів, код | 🟢 ⬜ |
+| — | [T15](.t/T15-P--bot-ux-accounts.md) | 💡 | bot-ux-accounts | UX бота для акаунтів: команди, меню, діалоги, екрани | 🟢 ⬜ |
+| — | [T16](.t/T16-B--accounts-alternatives.md) | 🧠 | accounts-alternatives | Варіанти ключових рішень: ключ акаунта, токени, доставка, доступ | 🟢 ⬜ |
+| — | [T17](.t/T17-Q--accounts-questions.md) | ❓ | accounts-questions | Питання до дизайну акаунтів (критичні позначено) | 🔴 ⬜ |
+| — | [T18](.t/T18--accounts-v1/plan.md) | ⚙️ | accounts-v1 | Акаунти v1: users/accounts/chats/routes + UI бота — план | 🟢 ⬜ |

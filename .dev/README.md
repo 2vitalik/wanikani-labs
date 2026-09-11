@@ -29,9 +29,11 @@
 - ✅ `history` на vv3 (2026-09-11): restore 194 771 + 23 933 дублікати з власного sync бота (очікувано), `rebuild-events` → 218 713 версій / 120 433 подій за 11 с — на 9 версій і 4 події більше за локальну базу (бот уже сам полить), `pending_events=0`. ⬜ Через 1–2 тижні — фінальний хвіст з vv1 і вимкнення cron ([T10](.t/T10-P--full-data-plan.md)). Перевірено: subjects main/light байт-у-байт однакові, різниця лише в тому, хто зловив версію — обʼєднання в глобальній `history` і є чиста база.
 - ⬜ Перенести `history` на vv3 (`mongodump`/`mongorestore`, ~93 MB на диску) + `rebuild-events` там — [deploy/README.md](../deploy/README.md) §8; після деплою бота.
 - ⬜ Web + Vue (статистика).
+- ⬜ Акаунти в Mongo замість env, multi-user через бота — дизайн [T14](.t/T14-P--accounts-model.md) (сутності `tg_users · accounts · chats · routes`, схема, токени Fernet, bootstrap з env, код), екрани й команди [T15](.t/T15-P--bot-ux-accounts.md), варіанти з аргументами [T16](.t/T16-B--accounts-alternatives.md), питання [T17](.t/T17-Q--accounts-questions.md) (⭐ Q1–Q5 блокують старт), задача [T18](.t/T18--accounts-v1/plan.md). Ключі `main`/`light` лишаються (нуль міграції `history`), нові акаунти — `wk_id[:8]`.
 
 ## Наступний крок
 
+- Ти: ⭐ Q1–Q5 у [T17](.t/T17-Q--accounts-questions.md) → я стартую [T18](.t/T18--accounts-v1/plan.md) (lib → доставка за маршрутами → UI бота).
 - Ти: відповіді `>` у T01/T02 (якщо є правки), токен бота + chat_id форуму → `.env` → локально `uv run wklabs-bot` з реальним Telegram → потім деплой за runbook.
 - Далі за деплоєм — історія на сервер (§8 runbook); локальна Mongo `kanji` більше не потрібна (дроп — на твій розсуд).
 - Бот на vv3 працює з повною історією. Ти: через 1–2 тижні — фінальний tar/scp з vv1 у `~/Giga/data/wanikani-server` → я доімпортую і дам дамп лише нових версій → вимкнути cron на vv1. Далі — крок 2 з [T07](.t/T07-P--bot-vision.md) (сесії, денний підсумок, стрік).
