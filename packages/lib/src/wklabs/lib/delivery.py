@@ -233,6 +233,82 @@ class RouteRepo:
             {"$set": {"status": STATUS_OK}, "$unset": {"error": "", "error_at": ""}},
         )
 
+    async def subscribe(self, category: str, chat_id: int, tg_id: int) -> Route:
+        """Global category in a chat: one route, on while anyone is subscribed (T22 §2)."""
+        now = utcnow()
+        d = await self.db.tg_routes.find_one_and_update(
+            {"account": None, "category": category, "chat_id": chat_id},
+            {
+                "$addToSet": {"subscribers": tg_id},
+                "$set": {"enabled": True, "updated_at": now, "updated_by": tg_id},
+                "$setOnInsert": {
+                    "thread_id": None,
+                    "thread_title": None,
+                    "created_by": tg_id,
+                    "created_at": now,
+                    "status": STATUS_OK,
+                    "settings": {},
+                },
+            },
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        assert d is not None
+        return Route.from_doc(d)
+
+    async def unsubscribe(self, category: str, chat_id: int, tg_id: int) -> Route | None:
+        now = utcnow()
+        d = await self.db.tg_routes.find_one_and_update(
+            {"account": None, "category": category, "chat_id": chat_id},
+            {"$pull": {"subscribers": tg_id}, "$set": {"updated_at": now, "updated_by": tg_id}},
+            return_document=ReturnDocument.AFTER,
+        )
+        if d is None:
+            return None
+        if not d.get("subscribers"):
+            await self.db.tg_routes.update_one({"_id": d["_id"]}, {"$set": {"enabled": False}})
+            d["enabled"] = False
+        return Route.from_doc(d)
+
+    async def add_target(
+        self,
+        account: str | None,
+        category: str,
+        chat_id: int,
+        thread_id: int | None,
+        title: str | None,
+        *,
+        by: int | None,
+    ) -> Route:
+        """(account, category) also goes to this chat/topic; other routes untouched."""
+        r = await self.upsert(account, category, chat_id, created_by=by)
+        await self.set_thread(r.id, thread_id, title, by=by)
+        return await self.get(r.id) or r
+
+    async def move_route(
+        self,
+        route: Route,
+        chat_id: int,
+        thread_id: int | None,
+        title: str | None,
+        *,
+        by: int | None,
+    ) -> Route:
+        """Retarget one route: same chat → new topic; other chat → old off, new on."""
+        if route.chat_id == chat_id:
+            await self.set_thread(route.id, thread_id, title, by=by)
+            return await self.get(route.id) or route
+        await self.set_enabled(route.id, False)
+        return await self.add_target(
+            route.account, route.category, chat_id, thread_id, title, by=by
+        )
+
+    async def set_setting(self, route_id: ObjectId, key: str, value: Any, *, by: int) -> None:
+        await self.db.tg_routes.update_one(
+            {"_id": route_id},
+            {"$set": {f"settings.{key}": value, "updated_at": utcnow(), "updated_by": by}},
+        )
+
     async def suspend_account(self, account: str) -> int:
         """Account removed: switch its live routes off, remembering which ones were on."""
         r = await self.db.tg_routes.update_many(
