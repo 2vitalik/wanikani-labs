@@ -21,14 +21,23 @@ from wklabs.lib.accounts import (
     looks_like_token,
     validate_token,
 )
-from wklabs.lib.delivery import LAYOUT_TOPICS, Chat, Route
+from wklabs.lib.chats import Chat
+from wklabs.lib.delivery import PRESET_GENERAL, PRESET_PER_CATEGORY, Route
 from wklabs.lib.users import TgUser
 
 from .. import texts
 from ..callbacks import AccCb, AddAccount, NavCb, Rename, RouteCb
 from ..context import AppContext
 from ..keyboards import kb_back_accounts, kb_cancel, kb_delivery, kb_remove_confirm
-from .common import accounts_screen, as_int, card_screen, edit, owned, routes_with_chats
+from .common import (
+    accounts_screen,
+    as_int,
+    card_screen,
+    edit,
+    owned,
+    routes_with_chats,
+    visible_chat,
+)
 
 log = logging.getLogger(__name__)
 router = Router(name="accounts")
@@ -179,7 +188,7 @@ async def msg_rename(message: Message, ctx: AppContext, user: TgUser, state: FSM
         await message.answer(texts.rename_bad(), reply_markup=kb_cancel())
         return
     await ctx.accounts.set_label(acc.key, label)
-    await ctx.topics.rename_account(acc.key, label)
+    await ctx.topics.rename_account(acc.key, acc.label, label)
     await state.clear()
     fresh = await ctx.accounts.get(acc.key)
     assert fresh is not None
@@ -241,8 +250,8 @@ async def delivery_screen(ctx: AppContext, acc: Account) -> tuple[str, InlineKey
             if r.account is None and r.category == "subjects"
         ]
         subjects.append((chat, found[0] if found else None))
-    owner_chats = await ctx.chats.for_user(acc.owner_tg_id) if acc.owner_tg_id else []
-    move_to = [c for c in owner_chats if c.id not in chat_ids]
+    owner_chats = await ctx.chats.visible_to(acc.owner_tg_id) if acc.owner_tg_id else []
+    move_to = [c for c in owner_chats if c.id not in chat_ids and c.present and c.can_post]
     return texts.delivery(acc, rows), kb_delivery(acc, rows, subjects, move_to)
 
 
@@ -277,10 +286,7 @@ async def cb_route_toggle(
 
 
 async def _user_chat(ctx: AppContext, user: TgUser, chat_id: int) -> Chat | None:
-    for c in await ctx.chats.for_user(user.id):
-        if c.id == chat_id:
-            return c
-    return await ctx.chats.get(chat_id) if user.is_admin else None
+    return await visible_chat(ctx, user, chat_id)
 
 
 @router.callback_query(AccCb.filter(F.action == "subj"))
@@ -314,8 +320,7 @@ async def cb_move(cb: CallbackQuery, callback_data: AccCb, ctx: AppContext, user
     if chat is None:
         await cb.answer("not your chat", show_alert=True)
         return
-    await ctx.routes.move_account(acc.key, chat.id, created_by=user.id)
-    if chat.layout == LAYOUT_TOPICS:
-        await ctx.topics.ensure_chat_topics(chat.id)
+    preset = chat.preset or (PRESET_PER_CATEGORY if chat.topics_possible else PRESET_GENERAL)
+    await ctx.topics.apply_preset(chat, [acc], preset, by=user.id)
     text, kb = await delivery_screen(ctx, acc)
     await edit(cb, text, kb)

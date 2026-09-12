@@ -1,23 +1,47 @@
-"""Inline keyboards (pure builders)."""
+"""Inline keyboards (pure builders) + the one reply keyboard (chat picker)."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
-
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import (
+    ChatAdministratorRights,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    KeyboardButtonRequestChat,
+    ReplyKeyboardMarkup,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from wklabs.lib.accounts import ACTIVE, PAUSED, Account
-from wklabs.lib.delivery import LAYOUT_SINGLE, LAYOUT_TOPICS, Chat, Route
+from wklabs.lib.chats import Chat
+from wklabs.lib.delivery import (
+    ERR_TOPIC_DELETED,
+    PRESET_GENERAL,
+    PRESET_LABEL,
+    PRESETS,
+    Route,
+)
 from wklabs.lib.users import ACTIVE as U_ACTIVE
 from wklabs.lib.users import BLOCKED, PENDING, TgUser
 
-from .callbacks import AccCb, AdminCb, NavCb, RouteCb, SetupCb
+from .callbacks import AccCb, AdminCb, ChatCb, NavCb, RouteCb
+
+PICK_CANCEL = "✖️ Cancel"
+# request_chat ids: which button was pressed (comes back in `chat_shared.request_id`)
+PICK_ADMIN, PICK_MEMBER, PICK_CHANNEL = 1, 2, 3
 
 
 def _on(flag: bool) -> str:
     return "✅" if flag else "🚫"
+
+
+def chat_icon(chat: Chat) -> str:
+    if not chat.present:
+        return "⚠️"
+    if chat.is_private:
+        return "🔒"
+    if chat.is_channel:
+        return "📢"
+    return "🗂" if chat.is_forum else "👥"
 
 
 def kb_accounts(accounts: list[Account], due: dict[str, int]) -> InlineKeyboardMarkup:
@@ -50,6 +74,12 @@ def kb_cancel() -> InlineKeyboardMarkup:
 def kb_back_accounts() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="👤 Accounts", callback_data=NavCb(screen="accounts"))
+    return b.as_markup()
+
+
+def kb_back_chats() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="💬 Chats", callback_data=NavCb(screen="chats"))
     return b.as_markup()
 
 
@@ -99,73 +129,194 @@ def kb_delivery(
             text=f"➡️ Move all to {chat.name}",
             callback_data=AccCb(key=acc.key, action="move", arg=str(chat.id)),
         )
+    b.button(text="➕ Add a chat", callback_data=NavCb(screen="addchat"))
     b.button(text="« Back", callback_data=AccCb(key=acc.key, action="card"))
     b.adjust(1)
     return b.as_markup()
 
 
-@dataclass(slots=True)
-class SetupState:
-    accounts: list[str] = field(default_factory=list)
-    layout: str = LAYOUT_SINGLE
-    subjects: bool = False
-    system: bool = False
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "accounts": list(self.accounts),
-            "layout": self.layout,
-            "subjects": self.subjects,
-            "system": self.system,
-        }
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any] | None) -> SetupState:
-        d = d or {}
-        return cls(
-            accounts=list(d.get("accounts") or []),
-            layout=str(d.get("layout") or LAYOUT_SINGLE),
-            subjects=bool(d.get("subjects")),
-            system=bool(d.get("system")),
-        )
+# ------------------------------------------------------------------- chats
+def kb_chats(chats: list[Chat], routes: dict[int, int]) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for c in chats:
+        if c.is_private:
+            text = "🔒 private · here"
+        elif not c.present:
+            text = f"⚠️ {c.name} · removed me"
+        else:
+            text = f"{chat_icon(c)} {c.name} · {c.kind}"
+        if routes.get(c.id):
+            text += f" · {routes[c.id]} ✓"
+        b.button(text=text, callback_data=ChatCb(chat=c.id, action="card"))
+    b.button(text="➕ Add a chat", callback_data=NavCb(screen="addchat"))
+    b.adjust(1)
+    return b.as_markup()
 
 
-def kb_setup(
-    st: SetupState, accounts: list[Account], chat: Chat, *, is_admin: bool
+def kb_chat_card(
+    chat: Chat, *, has_accounts: bool, has_routes: bool, in_group: bool
 ) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    for a in accounts:
-        mark = "☑" if a.key in st.accounts else "☐"
-        b.button(text=f"{mark} {a.label}", callback_data=SetupCb(field="acc", value=a.key))
-    b.adjust(2)
-    if chat.topics_possible:
-        row = InlineKeyboardBuilder()
-        row.button(
-            text=f"{'●' if st.layout == LAYOUT_TOPICS else '○'} topics per account",
-            callback_data=SetupCb(field="layout", value=LAYOUT_TOPICS),
-        )
-        row.button(
-            text=f"{'●' if st.layout == LAYOUT_SINGLE else '○'} single stream",
-            callback_data=SetupCb(field="layout", value=LAYOUT_SINGLE),
-        )
-        row.adjust(2)
-        b.attach(row)
-    opts = InlineKeyboardBuilder()
-    opts.button(
-        text=f"{'☑' if st.subjects else '☐'} 📚 subjects", callback_data=SetupCb(field="subjects")
-    )
-    if is_admin:
-        opts.button(
-            text=f"{'☑' if st.system else '☐'} 🛠 system", callback_data=SetupCb(field="system")
-        )
-    opts.adjust(2)
-    b.attach(opts)
-    act = InlineKeyboardBuilder()
-    act.button(text="✅ Apply", callback_data=SetupCb(field="apply"))
-    act.button(text="✖️ Cancel", callback_data=SetupCb(field="cancel"))
-    act.adjust(2)
-    b.attach(act)
+    if chat.is_private:
+        b.button(text="📨 Send test", callback_data=ChatCb(chat=chat.id, action="test"))
+        b.button(text="« Chats", callback_data=NavCb(screen="chats"))
+        b.adjust(1)
+        return b.as_markup()
+    if chat.present:
+        if has_accounts and chat.can_post:
+            b.button(text="📬 Deliver here…", callback_data=ChatCb(chat=chat.id, action="deliver"))
+        if chat.is_forum:
+            b.button(text="🧵 Topics", callback_data=ChatCb(chat=chat.id, action="topics"))
+        b.button(text="📨 Send test", callback_data=ChatCb(chat=chat.id, action="test"))
+    b.button(text="🔄 Refresh", callback_data=ChatCb(chat=chat.id, action="refresh"))
+    if has_routes:
+        b.button(text="🚫 Stop here", callback_data=ChatCb(chat=chat.id, action="stop"))
+    if not chat.present and not in_group:
+        b.button(text="🗑 Forget", callback_data=ChatCb(chat=chat.id, action="forget"))
+    if in_group:
+        b.button(text="🧹 Close", callback_data=ChatCb(chat=chat.id, action="close"))
+    else:
+        b.button(text="« Chats", callback_data=NavCb(screen="chats"))
+    b.adjust(3, 3, 1) if chat.present else b.adjust(2, 1)
     return b.as_markup()
+
+
+def kb_presets(chat: Chat, *, back: str = "card") -> InlineKeyboardMarkup:
+    """Forum with rights → four presets; anything else → one button (General)."""
+    b = InlineKeyboardBuilder()
+    if chat.topics_possible:
+        for p in PRESETS:
+            b.button(
+                text=f"✨ {PRESET_LABEL[p]}" if p != PRESET_GENERAL else f"💬 {PRESET_LABEL[p]}",
+                callback_data=ChatCb(chat=chat.id, action="preset", arg=p),
+            )
+        b.adjust(2, 2)
+    else:
+        b.button(
+            text="📬 Deliver my digests here",
+            callback_data=ChatCb(chat=chat.id, action="preset", arg=PRESET_GENERAL),
+        )
+        b.adjust(1)
+    tail = InlineKeyboardBuilder()
+    tail.button(text="« Back", callback_data=ChatCb(chat=chat.id, action=back))
+    b.attach(tail)
+    return b.as_markup()
+
+
+def kb_setup_light(chat: Chat, *, has_accounts: bool, bot_username: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    if has_accounts and chat.can_post:
+        if chat.topics_possible:
+            for p in PRESETS:
+                b.button(
+                    text=f"✨ {PRESET_LABEL[p]}"
+                    if p != PRESET_GENERAL
+                    else f"💬 {PRESET_LABEL[p]}",
+                    callback_data=ChatCb(chat=chat.id, action="preset", arg=p),
+                )
+            b.adjust(2, 2)
+        else:
+            b.button(
+                text="📬 Deliver my digests here",
+                callback_data=ChatCb(chat=chat.id, action="preset", arg=PRESET_GENERAL),
+            )
+            b.adjust(1)
+    tail = InlineKeyboardBuilder()
+    tail.button(text="⚙️ Configure here", callback_data=ChatCb(chat=chat.id, action="card"))
+    tail.button(text="⚙️ In private", url=deep_link(bot_username, chat.id))
+    tail.adjust(2)
+    b.attach(tail)
+    return b.as_markup()
+
+
+def deep_link(bot_username: str, chat_id: int) -> str:
+    return f"https://t.me/{bot_username}?start=chat_{chat_id}"
+
+
+def kb_stop_confirm(chat: Chat) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="🚫 Yes, stop", callback_data=ChatCb(chat=chat.id, action="stop_yes"))
+    b.button(text="« Back", callback_data=ChatCb(chat=chat.id, action="card"))
+    b.adjust(2)
+    return b.as_markup()
+
+
+def kb_topics(chat: Chat) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="« Chat", callback_data=ChatCb(chat=chat.id, action="card"))
+    return b.as_markup()
+
+
+def kb_greet(chat: Chat) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="📬 Deliver here…", callback_data=ChatCb(chat=chat.id, action="deliver"))
+    b.button(text="Later", callback_data=ChatCb(chat=chat.id, action="later"))
+    b.adjust(2)
+    return b.as_markup()
+
+
+def kb_route_error(route: Route) -> InlineKeyboardMarkup | None:
+    if route.error != ERR_TOPIC_DELETED:
+        return None
+    b = InlineKeyboardBuilder()
+    b.button(text="✨ Recreate topic", callback_data=RouteCb(id=str(route.id), action="recreate"))
+    b.button(text="💬 Chats", callback_data=NavCb(screen="chats"))
+    b.adjust(2)
+    return b.as_markup()
+
+
+def kb_pick_chat() -> ReplyKeyboardMarkup:
+    """The only reply keyboard: `request_chat` lives nowhere else (Bot API)."""
+    admin = ChatAdministratorRights(
+        is_anonymous=False,
+        can_manage_chat=True,
+        can_delete_messages=False,
+        can_manage_video_chats=False,
+        can_restrict_members=False,
+        can_promote_members=False,
+        can_change_info=False,
+        can_invite_users=False,
+        can_post_stories=False,
+        can_edit_stories=False,
+        can_delete_stories=False,
+        can_manage_topics=True,
+    )
+    channel = admin.model_copy(update={"can_manage_topics": False, "can_post_messages": True})
+    rows = [
+        [
+            KeyboardButton(
+                text="📂 Group or forum",
+                request_chat=KeyboardButtonRequestChat(
+                    request_id=PICK_ADMIN,
+                    chat_is_channel=False,
+                    bot_administrator_rights=admin,
+                    request_title=True,
+                ),
+            ),
+            KeyboardButton(
+                text="👥 Chat I'm already in",
+                request_chat=KeyboardButtonRequestChat(
+                    request_id=PICK_MEMBER,
+                    chat_is_channel=False,
+                    bot_is_member=True,
+                    request_title=True,
+                ),
+            ),
+        ],
+        [
+            KeyboardButton(
+                text="📢 Channel",
+                request_chat=KeyboardButtonRequestChat(
+                    request_id=PICK_CHANNEL,
+                    chat_is_channel=True,
+                    bot_administrator_rights=channel,
+                    request_title=True,
+                ),
+            ),
+            KeyboardButton(text=PICK_CANCEL),
+        ],
+    ]
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, one_time_keyboard=True)
 
 
 def kb_continue_private(bot_username: str) -> InlineKeyboardMarkup:

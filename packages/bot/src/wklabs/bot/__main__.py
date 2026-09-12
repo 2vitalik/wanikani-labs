@@ -24,9 +24,10 @@ from aiogram.types import (
 )
 
 from wklabs.lib.accounts import AccountRepo
+from wklabs.lib.chats import ChatRepo
 from wklabs.lib.crypto import CipherError, TokenCipher
 from wklabs.lib.db import TG_FSM, Db
-from wklabs.lib.delivery import ChatRepo, RouteRepo
+from wklabs.lib.delivery import RouteRepo
 from wklabs.lib.logging_setup import setup_logging
 from wklabs.lib.settings import get_settings
 from wklabs.lib.sync import SyncEngine
@@ -34,7 +35,7 @@ from wklabs.lib.users import TgUserRepo
 
 from .context import AppContext
 from .handlers import ROUTERS
-from .middleware import UserMiddleware
+from .middleware import ChatMiddleware, UserMiddleware
 from .notifier import Notifier
 from .scheduler import build_scheduler
 from .topics import TopicManager
@@ -43,6 +44,7 @@ log = logging.getLogger("wklabs.bot")
 
 PRIVATE_COMMANDS = [
     BotCommand(command="accounts", description="your WaniKani accounts"),
+    BotCommand(command="chats", description="chats and forums I post to"),
     BotCommand(command="status", description="levels, reviews due, last sync"),
     BotCommand(command="help", description="how it works"),
 ]
@@ -73,6 +75,7 @@ async def run() -> None:
     accounts = AccountRepo(db, cipher)
     users = TgUserRepo(db, admin_ids=settings.tg_admin_ids, policy=settings.access_policy)
     chats, routes = ChatRepo(db), RouteRepo(db)
+    await chats.normalize_legacy()
     active = await accounts.list()
     log.info(
         "MongoDB connected: db=%s · active accounts=%s · policy=%s · admins=%s",
@@ -91,7 +94,14 @@ async def run() -> None:
     engine = SyncEngine(db, accounts)
     topics = TopicManager(bot, chats, routes, accounts)
     notifier = Notifier(
-        db, bot, routes=routes, accounts=accounts, users=users, topics=topics, tz=settings.tz
+        db,
+        bot,
+        routes=routes,
+        chats=chats,
+        accounts=accounts,
+        users=users,
+        topics=topics,
+        tz=settings.tz,
     )
     ctx = AppContext(
         settings=settings,
@@ -127,8 +137,10 @@ async def run() -> None:
                 client=db.client, db_name=settings.mongo_db, collection_name=TG_FSM
             )
             dp = Dispatcher(storage=storage)
-            dp.message.outer_middleware(UserMiddleware(ctx))
-            dp.callback_query.outer_middleware(UserMiddleware(ctx))
+            seen = ChatMiddleware(ctx)  # first: registers the chat even for blocked users
+            for observer in (dp.message, dp.callback_query, dp.my_chat_member):
+                observer.outer_middleware(seen)
+                observer.outer_middleware(UserMiddleware(ctx))
             for r in ROUTERS:
                 dp.include_router(r)
             dp["ctx"] = ctx

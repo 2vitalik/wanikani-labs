@@ -14,12 +14,14 @@ class AccCb(CallbackData, prefix="acc"):
 
 class RouteCb(CallbackData, prefix="rt"):
     id: str  # ObjectId hex
-    action: str = "toggle"
+    action: str = "toggle"  # toggle recreate
 
 
-class SetupCb(CallbackData, prefix="setup"):
-    field: str  # acc layout subjects system apply cancel
-    value: str = ""
+class ChatCb(CallbackData, prefix="ch"):
+    chat: int
+    # card deliver preset test refresh topics stop stop_yes forget close later
+    action: str
+    arg: str = ""
 
 
 class AdminCb(CallbackData, prefix="adm"):
@@ -28,7 +30,7 @@ class AdminCb(CallbackData, prefix="adm"):
 
 
 class NavCb(CallbackData, prefix="nav"):
-    screen: str  # accounts add cancel help
+    screen: str  # accounts add cancel help chats addchat
 
 
 class AddAccount(StatesGroup):
@@ -37,7 +39,3 @@ class AddAccount(StatesGroup):
 
 class Rename(StatesGroup):
     label = State()  # data: {"key": key}
-
-
-class Setup(StatesGroup):
-    editing = State()  # data: {"setup": SetupState as dict}

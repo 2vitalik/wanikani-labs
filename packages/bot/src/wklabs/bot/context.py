@@ -11,8 +11,9 @@ from html import escape
 from aiogram import Bot
 
 from wklabs.lib.accounts import AccountRepo
+from wklabs.lib.chats import ChatRepo
 from wklabs.lib.db import Db
-from wklabs.lib.delivery import ChatRepo, RouteRepo
+from wklabs.lib.delivery import RouteRepo
 from wklabs.lib.settings import Settings
 from wklabs.lib.sync import SyncEngine, SyncResult
 from wklabs.lib.timeutil import utcnow

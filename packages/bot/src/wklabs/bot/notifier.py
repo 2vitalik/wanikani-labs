@@ -2,7 +2,8 @@
 
 One event can travel several routes (shared chats, global categories);
 `events.delivered` remembers which routes already got it, so a crash in the
-middle does not resend.
+middle does not resend. A failing route is marked (`status: error`) and its
+owner told once; success clears the mark.
 """
 
 from __future__ import annotations
@@ -19,13 +20,23 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, Teleg
 from aiogram.types import InlineKeyboardMarkup, LinkPreviewOptions
 
 from wklabs.lib.accounts import AccountRepo
+from wklabs.lib.chats import KICKED, ChatRepo
 from wklabs.lib.db import Db
-from wklabs.lib.delivery import Route, RouteRepo
+from wklabs.lib.delivery import (
+    ERR_FORBIDDEN,
+    ERR_NO_RIGHTS,
+    ERR_TOPIC_CLOSED,
+    ERR_TOPIC_DELETED,
+    Route,
+    RouteRepo,
+)
 from wklabs.lib.subjects import load_subjects
 from wklabs.lib.timeutil import utcnow
 from wklabs.lib.users import TgUserRepo
 
+from . import texts
 from .digest import render
+from .keyboards import kb_route_error
 from .routing import target_for
 from .topics import TopicManager
 
@@ -36,6 +47,20 @@ NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
 PER_SEND_DELAY = 0.3
 
 
+def classify_bad_request(exc: Exception) -> str | None:
+    """Map a Telegram error to a route error code; None = transient, retry."""
+    msg = str(exc).lower()
+    if "topic_closed" in msg or "topic closed" in msg:
+        return ERR_TOPIC_CLOSED
+    if "thread not found" in msg or "topic_id_invalid" in msg or "message thread" in msg:
+        return ERR_TOPIC_DELETED
+    if "not enough rights" in msg or "have no rights" in msg or "write_forbidden" in msg:
+        return ERR_NO_RIGHTS
+    if "chat not found" in msg or "bot was kicked" in msg or "bot is not a member" in msg:
+        return ERR_FORBIDDEN
+    return None
+
+
 class Notifier:
     def __init__(
         self,
@@ -43,6 +68,7 @@ class Notifier:
         bot: Bot | None,
         *,
         routes: RouteRepo,
+        chats: ChatRepo,
         accounts: AccountRepo,
         users: TgUserRepo,
         topics: TopicManager,
@@ -51,6 +77,7 @@ class Notifier:
         self.db = db
         self.bot = bot
         self.routes = routes
+        self.chats = chats
         self.accounts = accounts
         self.users = users
         self.topics = topics
@@ -87,12 +114,12 @@ class Notifier:
             subject_ids = {int(e["subject_id"]) for e in evs if e.get("subject_id") is not None}
             subjects = await load_subjects(self.db, subject_ids)
             label = labels.get(account, account) if account else None
-            texts = render(category, label, evs, subjects, self.tz)
+            texts_ = render(category, label, evs, subjects, self.tz)
             for route in routes:
                 todo = [e for e in evs if route.id not in (e.get("delivered") or [])]
                 if not todo:
                     continue
-                msg_ids = await self.send_route(route, texts)
+                msg_ids = await self.send_route(route, texts_)
                 await self.db.events.update_many(
                     {"_id": {"$in": [e["_id"] for e in todo]}},
                     {
@@ -111,73 +138,133 @@ class Notifier:
         )
 
     # ------------------------------------------------------------- send
-    async def send_route(self, route: Route, texts: list[str]) -> list[int]:
+    async def send_route(self, route: Route, texts_: list[str]) -> list[int]:
         thread = await self.topics.ensure_thread(route)
-        return await self.send(route.chat_id, thread, texts, meta={"route": route.id})
+        ids: list[int] = []
+        for t in texts_:
+            mid, err = await self.send_one(route.chat_id, thread, t, meta={"route": route.id})
+            if err is not None:
+                await self._route_failed(route, err)
+                return ids
+            if mid is not None:
+                ids.append(mid)
+            await asyncio.sleep(PER_SEND_DELAY)
+        if route.has_error and not self.dry_run:
+            await self.routes.clear_error(route.id)
+        return ids
+
+    async def _route_failed(self, route: Route, err: str) -> None:
+        chat = await self.chats.get(route.chat_id)
+        chat_name = chat.name if chat else str(route.chat_id)
+        if err == ERR_FORBIDDEN:
+            n = await self.routes.disable_chat(route.chat_id)
+            await self.chats.set_status(route.chat_id, KICKED)
+            log.warning("chat %s forbidden → %d route(s) disabled", route.chat_id, n)
+            await self._tell_owners_removed(route.chat_id, chat_name)
+            return
+        if err == ERR_TOPIC_DELETED and route.thread_id is not None:
+            await self.routes.clear_thread(route.chat_id, route.thread_id)
+            await self.chats.topic_gone(route.chat_id, route.thread_id)
+        elif err == ERR_TOPIC_CLOSED and route.thread_id is not None:
+            await self.chats.topic_closed(route.chat_id, route.thread_id)
+        if not await self.routes.set_error(route.id, err):
+            return  # same problem as before: the owner already knows
+        fresh = await self.routes.get(route.id) or route
+        label = None
+        owner: int | None = None
+        if route.account:
+            acc = await self.accounts.get(route.account)
+            if acc:
+                label, owner = acc.label, acc.owner_tg_id
+        text = texts.route_error(fresh, chat_name, label)
+        if owner is not None:
+            await self.send(owner, None, [text], reply_markup=kb_route_error(fresh))
+        else:
+            await self.admins(text)
+
+    async def _tell_owners_removed(self, chat_id: int, chat_name: str) -> None:
+        by_owner: dict[int, list[str]] = defaultdict(list)
+        for r in await self.routes.for_chat(chat_id, include_disabled=True):
+            if not r.account:
+                continue
+            acc = await self.accounts.get(r.account)
+            if acc and acc.owner_tg_id is not None and acc.label not in by_owner[acc.owner_tg_id]:
+                by_owner[acc.owner_tg_id].append(acc.label)
+        for owner, labels in by_owner.items():
+            await self.send(owner, None, [texts.removed_from_chat(chat_name, labels)])
+
+    async def send_one(
+        self,
+        chat_id: int,
+        thread_id: int | None,
+        text: str,
+        *,
+        meta: Json | None = None,
+        reply_markup: InlineKeyboardMarkup | None = None,
+    ) -> tuple[int | None, str | None]:
+        """One message → (message id, None) or (None, error code). Dry-run logs."""
+        if self.bot is None:
+            log.info("[dry-run → %s/%s]\n%s", chat_id, thread_id, text)
+            return None, None
+        for attempt in range(3):
+            try:
+                msg = await self.bot.send_message(
+                    chat_id,
+                    text,
+                    message_thread_id=thread_id,
+                    link_preview_options=NO_PREVIEW,
+                    reply_markup=reply_markup,
+                )
+            except TelegramRetryAfter as exc:
+                log.warning("flood wait %ss", exc.retry_after)
+                await asyncio.sleep(exc.retry_after + 1)
+                continue
+            except TelegramForbiddenError as exc:
+                log.warning("send to %s forbidden: %s", chat_id, exc)
+                return None, ERR_FORBIDDEN
+            except TelegramBadRequest as exc:
+                code = classify_bad_request(exc)
+                if code is not None:
+                    log.warning("send to %s/%s: %s (%s)", chat_id, thread_id, code, exc)
+                    return None, code
+                log.exception("send to %s/%s failed (attempt %d)", chat_id, thread_id, attempt + 1)
+                await asyncio.sleep(2 * (attempt + 1))
+            except Exception:
+                log.exception("send to %s/%s failed (attempt %d)", chat_id, thread_id, attempt + 1)
+                await asyncio.sleep(2 * (attempt + 1))
+            else:
+                await self.db.tg_messages.insert_one(
+                    {
+                        "chat_id": chat_id,
+                        "thread_id": thread_id,
+                        "message_id": msg.message_id,
+                        "sent_at": utcnow(),
+                        "chars": len(text),
+                        **(meta or {}),
+                    }
+                )
+                return msg.message_id, None
+        return None, "send failed"
 
     async def send(
         self,
         chat_id: int,
         thread_id: int | None,
-        texts: list[str],
+        texts_: list[str],
         *,
         meta: Json | None = None,
         reply_markup: InlineKeyboardMarkup | None = None,
     ) -> list[int]:
         """Send texts to a chat/thread (or log them in dry-run). Returns message ids."""
         ids: list[int] = []
-        if self.bot is None:
-            for t in texts:
-                log.info("[dry-run → %s/%s]\n%s", chat_id, thread_id, t)
-            return ids
-        for t in texts:
-            for attempt in range(3):
-                try:
-                    msg = await self.bot.send_message(
-                        chat_id,
-                        t,
-                        message_thread_id=thread_id,
-                        link_preview_options=NO_PREVIEW,
-                        reply_markup=reply_markup,
-                    )
-                    ids.append(msg.message_id)
-                    await self.db.tg_messages.insert_one(
-                        {
-                            "chat_id": chat_id,
-                            "thread_id": thread_id,
-                            "message_id": msg.message_id,
-                            "sent_at": utcnow(),
-                            "chars": len(t),
-                            **(meta or {}),
-                        }
-                    )
-                    break
-                except TelegramRetryAfter as exc:
-                    log.warning("flood wait %ss", exc.retry_after)
-                    await asyncio.sleep(exc.retry_after + 1)
-                except TelegramForbiddenError as exc:
-                    # user blocked the bot / bot kicked from the chat: stop delivering there
-                    n = await self.routes.disable_chat(chat_id)
-                    log.warning("chat %s forbidden (%s) → %d route(s) disabled", chat_id, exc, n)
-                    return ids
-                except TelegramBadRequest as exc:
-                    if thread_id is not None and "thread" in str(exc).lower():
-                        # topic deleted by hand → forget the thread, it is recreated next time
-                        await self.db.tg_routes.update_many(
-                            {"chat_id": chat_id, "thread_id": thread_id},
-                            {"$set": {"thread_id": None, "thread_title": None}},
-                        )
-                        log.warning("thread %s/%s gone (%s) → cleared", chat_id, thread_id, exc)
-                        return ids
-                    log.exception(
-                        "send to %s/%s failed (attempt %d)", chat_id, thread_id, attempt + 1
-                    )
-                    await asyncio.sleep(2 * (attempt + 1))
-                except Exception:
-                    log.exception(
-                        "send to %s/%s failed (attempt %d)", chat_id, thread_id, attempt + 1
-                    )
-                    await asyncio.sleep(2 * (attempt + 1))
+        for t in texts_:
+            mid, err = await self.send_one(
+                chat_id, thread_id, t, meta=meta, reply_markup=reply_markup
+            )
+            if err is not None:
+                return ids
+            if mid is not None:
+                ids.append(mid)
             await asyncio.sleep(PER_SEND_DELAY)
         return ids
 

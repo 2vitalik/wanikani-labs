@@ -7,11 +7,29 @@ from html import escape
 from zoneinfo import ZoneInfo
 
 from wklabs.lib.accounts import AUTH_ERROR, KEY_ERROR, Account, WkIdentity
-from wklabs.lib.delivery import CATEGORY_ICON, LAYOUT_TOPICS, Chat, Route
+from wklabs.lib.chats import (
+    HINT_BASIC_GROUP,
+    HINT_CANNOT_POST,
+    HINT_CHANNEL_NO_POST,
+    HINT_FORUM_NOT_ADMIN,
+    HINT_GONE,
+    HINT_NO_TOPICS_RIGHT,
+    HINT_NOT_FORUM,
+    HINT_UNKNOWN,
+    Chat,
+    hints,
+)
+from wklabs.lib.delivery import (
+    CATEGORY_ICON,
+    ERR_FORBIDDEN,
+    ERR_NO_RIGHTS,
+    ERR_TOPIC_CLOSED,
+    ERR_TOPIC_DELETED,
+    PRESET_LABEL,
+    Route,
+)
 from wklabs.lib.sync import SyncResult
 from wklabs.lib.users import PENDING, TgUser
-
-from .keyboards import SetupState
 
 TOKEN_URL = "https://www.wanikani.com/settings/personal_access_tokens"
 
@@ -60,14 +78,18 @@ def help_text() -> str:
     return (
         "<b>wanikani-labs bot</b>\n"
         "/accounts — your WaniKani accounts: add, rename, pause, delivery\n"
+        "/chats — chats and forums I post to\n"
         "/status — levels, reviews due, last sync\n"
         "/help — this\n\n"
         f"<b>Token:</b> create one at {TOKEN_URL} — read-only is enough (leave all "
         "checkboxes off). Send it to me here in private; I delete your message at once "
         "and store the token encrypted.\n\n"
-        "<b>Forum with topics:</b> add me to a forum as admin with <i>Manage Topics</i> "
-        "and send /setup there — each account gets its own topics.\n"
-        "<b>Group:</b> same, /setup — digests go to the group as one stream."
+        "<b>Chats &amp; forums:</b> /chats — where I post. ➕ picks a chat from your list; "
+        "Telegram adds me with the rights I need. In a forum choose a preset — one topic per "
+        "category, per account, one for all, or General — then move any digest to any topic. "
+        "I only know topics I created or saw messages in. Prefer commands? Add me to the chat "
+        "and send /setup there.\n"
+        "<b>Rights I need:</b> post messages; forums — admin + <i>Manage Topics</i>."
     )
 
 
@@ -173,9 +195,7 @@ def added_done(acc: Account, ident: WkIdentity, res: SyncResult, *, private: boo
         lines.append("❌ " + e("; ".join(res.errors[:3])))
     if private:
         lines.append("Digests will arrive here, in this chat.")
-        lines.append(
-            "Want topics in a forum instead? Add me there as admin (Manage Topics) and send /setup."
-        )
+        lines.append("Want a group or forum instead? /chats → ➕ Add a chat.")
     return "\n".join(lines)
 
 
@@ -214,49 +234,217 @@ def delivery(acc: Account, rows: list[tuple[Route, Chat]]) -> str:
         lines.append(f"{'✅' if r.enabled else '🚫'} {icon} {r.category} → {where}")
     lines.append("")
     lines.append("📚 subjects = WaniKani content changes (per chat).")
-    lines.append("+ another chat: add me there and send /setup.")
+    lines.append("+ another chat: ➕ Add a chat (or /setup there).")
     return "\n".join(lines)
 
 
-# ------------------------------------------------------------------ setup
-def setup_screen(chat: Chat, st: SetupState, *, mine: int) -> str:
-    kind = "forum" if chat.is_forum else chat.type
-    rights = (
-        "I can manage topics ✅"
-        if chat.topics_possible
-        else (
-            "forum, but I need admin with Manage Topics for per-account topics"
-            if chat.is_forum
-            else ""
-        )
+# ------------------------------------------------------------------ chats
+HINTS = {
+    HINT_BASIC_GROUP: "💡 Topics need a supergroup: Group settings → Topics converts it "
+    "(I follow the new id).",
+    HINT_NOT_FORUM: "💡 Want one topic per account? Group settings → Topics, then 🔄 Refresh.",
+    HINT_FORUM_NOT_ADMIN: "⚠️ Topics need me as admin with Manage Topics → then 🔄 Refresh.",
+    HINT_NO_TOPICS_RIGHT: "⚠️ Missing right: Manage Topics → then 🔄 Refresh.",
+    HINT_CANNOT_POST: "⚠️ I can't post here (restricted). Ask an admin to allow me.",
+    HINT_CHANNEL_NO_POST: "⚠️ Need the Post Messages right.",
+    HINT_GONE: "🚫 I'm no longer in this chat. Add me back or Forget it.",
+    HINT_UNKNOWN: "ℹ️ Not checked yet → 🔄 Refresh.",
+}
+ROUTE_ERRORS = {
+    ERR_TOPIC_CLOSED: "topic closed — reopen it or pick another target",
+    ERR_TOPIC_DELETED: "topic deleted — delivering to General; ✨ Recreate or pick another",
+    ERR_NO_RIGHTS: "can't post there — check my rights (🔄 Refresh in /chats)",
+    ERR_FORBIDDEN: "I was removed from that chat",
+}
+
+
+def hint_lines(chat: Chat) -> list[str]:
+    return [HINTS[h] for h in hints(chat) if h in HINTS]
+
+
+def rights_line(chat: Chat) -> str:
+    if chat.is_private:
+        return ""
+    if not chat.present:
+        return f"me: {chat.status}"
+    if not chat.inspected:
+        return "me: not checked"
+    who = "admin" if chat.is_admin else chat.status
+    parts = [f"me: {who}", f"post {'✅' if chat.can_post else '✗'}"]
+    if chat.is_forum:
+        parts.append(f"topics {'✅' if chat.topics_possible else '✗'}")
+    if chat.is_admin:
+        parts.append(f"delete {'✅' if chat.rights.can_delete else '✗'}")
+    return " · ".join(parts)
+
+
+def chats_list(chats: list[Chat]) -> str:
+    n = sum(1 for c in chats if not c.is_private)
+    lines = ["💬 <b>Chats I can post to</b>" + (f" · {n}" if n else "")]
+    lines.append("Don't see a chat? Add it with ➕, or send /setup there.")
+    return "\n".join(lines)
+
+
+def chat_card(
+    chat: Chat,
+    rows: list[tuple[Route, Account | None]],
+    *,
+    viewer: int,
+    note: str | None = None,
+) -> str:
+    icon = (
+        "🔒" if chat.is_private else ("📢" if chat.is_channel else ("🗂" if chat.is_forum else "👥"))
     )
-    lines = [f"🛠 <b>Setup — «{e(chat.name)}»</b> · {kind}" + (f" · {rights}" if rights else "")]
-    if mine == 0:
-        lines.append("You have no accounts yet — add one in private (/accounts).")
+    lines = []
+    if note:
+        lines.append(note)
+    lines.append(f"{icon} <b>{e(chat.name)}</b> · {chat.kind}")
+    rl = rights_line(chat)
+    if rl:
+        lines.append(rl)
+    lines.extend(hint_lines(chat))
+    live = [(r, a) for r, a in rows if r.enabled]
+    if live:
+        lines.append("Delivering here:")
+        owners: set[int] = set()
+        for r, acc in live:
+            who = ""
+            if acc is not None:
+                owners.add(acc.owner_tg_id or 0)
+                who = f" · {e(acc.label)}" + ("" if acc.owner_tg_id == viewer else " (theirs)")
+            where = f" → {e(r.thread_title)}" if r.thread_id is not None and r.thread_title else ""
+            err = f" ⚠️ {e(r.error)}" if r.has_error else ""
+            lines.append(f"{r.icon} {r.category}{who}{where}{err}")
+        if len(owners) > 1:
+            lines.append(f"{len(owners)} people deliver here")
     else:
+        lines.append("Nothing delivered here yet.")
+    if chat.is_forum and chat.present:
+        extra = [f"topics known: {len(chat.topics)}"]
+        if chat.preset:
+            extra.append(f"last preset: {PRESET_LABEL.get(chat.preset, chat.preset)}")
+        lines.append(" · ".join(extra))
+    return "\n".join(lines)
+
+
+def presets_screen(chat: Chat) -> str:
+    lines = [f"📬 <b>Deliver to «{e(chat.name)}»</b> — all your accounts move here."]
+    if chat.topics_possible:
         lines.append(
-            "Tick the accounts to deliver here; their digests move from wherever they go now."
+            "Pick a preset: topic per category (📝 Name · reviews, 🏆 Name · milestones), "
+            "topic per account (Name), one topic for all (WaniKani), or General. "
+            "You can move any digest to any topic afterwards."
         )
-    if st.layout == LAYOUT_TOPICS:
-        lines.append("Layout: one topic per account and category.")
-    else:
-        lines.append("Layout: everything as one stream in this chat.")
+    elif chat.is_forum:
+        lines.append("Topics need Manage Topics — for now digests go to General.")
     return "\n".join(lines)
 
 
-def setup_done(chat: Chat, st: SetupState, created: list[str], labels: list[str]) -> str:
-    lines = ["✅ Setup applied."]
-    if labels:
-        lines.append("Delivering here: " + ", ".join(e(x) for x in labels) + ".")
-    else:
-        lines.append("No accounts delivered here.")
+def preset_done(labels: list[str], created: list[str], reused: int, general: bool) -> str:
+    who = ", ".join(e(x) for x in labels) or "nothing"
+    parts = [f"✅ {who} → here"]
     if created:
-        lines.append(f"{len(created)} topic(s) created: " + ", ".join(e(x) for x in created))
+        parts.append(f"{len(created)} topic(s) created: " + ", ".join(e(x) for x in created))
+    if reused:
+        parts.append(f"{reused} existing topic(s) reused")
+    if general and not created and not reused:
+        parts.append("as one stream")
+    return " · ".join(parts)
+
+
+def setup_light(chat: Chat, *, accounts: int) -> str:
+    lines = [f"🛠 <b>{e(chat.name)}</b> · {chat.kind} · {rights_line(chat)}"]
+    lines.extend(hint_lines(chat))
+    if accounts == 0:
+        lines.append("You have no WaniKani accounts yet — add one in private: /accounts.")
+    elif chat.can_post:
+        lines.append("Deliver your digests here with one tap, or configure in detail.")
     return "\n".join(lines)
 
 
-def setup_cancelled() -> str:
-    return "Setup cancelled — nothing changed."
+def pick_chat() -> str:
+    return (
+        "Pick where I should post 👇\n"
+        "If I'm not there yet, Telegram adds me with the rights I need "
+        "(admin + Manage Topics for forums).\n"
+        "Prefer commands? Add me to the chat and send /setup there."
+    )
+
+
+def picked(title: str | None) -> str:
+    return f"✅ «{e(title)}»" if title else "✅ picked"
+
+
+def pick_absent() -> str:
+    return "I'm not in that chat. If you're its admin, add me there; otherwise ask an admin."
+
+
+def pick_cancelled() -> str:
+    return "Cancelled."
+
+
+def stop_confirm(chat: Chat, labels: list[str]) -> str:
+    who = ", ".join(e(x) for x in labels)
+    return (
+        f"Stop delivering {who} to «{e(chat.name)}»? Digests go back to your private chat "
+        "if nowhere else. I stay in the chat."
+    )
+
+
+def stopped(chat: Chat, n: int) -> str:
+    return f"🚫 {n} route(s) to «{e(chat.name)}» switched off."
+
+
+def forgotten(chat: Chat) -> str:
+    return f"🗑 «{e(chat.name)}» forgotten. If I'm added there again, it comes back."
+
+
+def topics_list(chat: Chat) -> str:
+    lines = [f"🧵 <b>Topics — {e(chat.name)}</b> · {len(chat.topics)} known"]
+    for t in sorted(chat.topics.values(), key=lambda x: x.thread_id):
+        tags = " · by me" if t.by_bot else ""
+        tags += " · closed" if t.closed else ""
+        lines.append(f"• {e(t.name)}{tags}")
+    lines.append("")
+    lines.append(
+        "I only see topics I created or saw messages in — post anything in a topic "
+        "and it appears here. New topics: via a preset (📬 Deliver here…) for now."
+    )
+    if not chat.topics_possible:
+        lines.extend(hint_lines(chat))
+    return "\n".join(lines)
+
+
+def test_message() -> str:
+    return "✅ test · wanikani-labs"
+
+
+def test_result(error: str | None) -> str:
+    return "✅ sent" if error is None else f"❌ {error}"
+
+
+def greet_dm(chat: Chat) -> str:
+    return f"👋 I'm in «{e(chat.name)}» now · {chat.kind} · {rights_line(chat)}\n" + "\n".join(
+        hint_lines(chat)
+    )
+
+
+def greet_chat() -> str:
+    return "Hi! WaniKani digests here → /setup, or open me in private → /chats."
+
+
+def removed_from_chat(chat_name: str, labels: list[str]) -> str:
+    who = ", ".join(e(x) for x in labels)
+    return f"🚫 Removed from «{e(chat_name)}» — {who} paused there. /chats to pick another."
+
+
+def route_error(route: Route, chat_name: str, label: str | None) -> str:
+    what = f"{route.icon} {route.category}" + (f" · {e(label)}" if label else "")
+    return f"⚠️ {what} → «{e(chat_name)}»: {ROUTE_ERRORS.get(route.error or '', e(route.error))}"
+
+
+def recreated(name: str) -> str:
+    return f"✨ Topic «{e(name)}» recreated — digests go there again."
 
 
 # ------------------------------------------------------------------ admin
