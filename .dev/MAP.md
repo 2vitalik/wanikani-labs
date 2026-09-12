@@ -2,7 +2,7 @@
 
 <!-- автоген: `dev map` (або `dev gen`), руками не редагувати -->
 
-Наступний вільний ID: **T22** · тікетів: 21 · дерево вузлів — [TREE.md](TREE.md)
+Наступний вільний ID: **T26** · тікетів: 25 · дерево вузлів — [TREE.md](TREE.md)
 
 Типи: `Q`❓ питання · `P`💡 пропозиція · `C`🔆 clarification · `B`🧠 brainstorm · `R`✔️ readback · `S`📝 summary · `D`🗄️ digest (на пенсії) · ⚙️ задача (тека, без літери). state: 🟢/🔴 — чи чекає твоєї відповіді · 🟩/⬜ — чи інтегровано в README вузла.
 
@@ -29,3 +29,7 @@
 | — | [T19](.t/T19-C--accounts-answers.md) | 🔆 | accounts-answers | Відповіді на питання з чату по дизайну акаунтів і що переглянуто | 🟢 ⬜ |
 | — | [T20](.t/T20-Q--accounts-questions-2.md) | ❓ | accounts-questions-2 | Питання раунду 2: доступ, Fernet, міграція ключів, env | 🔴 ⬜ |
 | — | [T21](.t/T21-R--accounts-decisions.md) | ✔️ | accounts-decisions | Readback: рішення по акаунтах (T17, T20, чат 2026-09-12) | 🟢 ⬜ |
+| — | [T22](.t/T22-P--chats-delivery-model.md) | 💡 | chats-delivery-model | Чати як ціль доставки: реєстр чатів, топіки, маршрути, налаштування, код | 🟢 ⬜ |
+| — | [T23](.t/T23-P--bot-ux-chats.md) | 💡 | bot-ux-chats | UX бота для чатів і форумів: команди, екрани, вибір цілі, топіки, довідка | 🟢 ⬜ |
+| — | [T24](.t/T24-B--chats-alternatives.md) | 🧠 | chats-alternatives | Варіанти рішень по чатах: дискавері, вибір чату, реєстр топіків, /setup, налаштування | 🟢 ⬜ |
+| — | [T25](.t/T25-Q--chats-questions.md) | ❓ | chats-questions | Питання до дизайну чатів і доставки (критичні позначено) | 🔴 ⬜ |

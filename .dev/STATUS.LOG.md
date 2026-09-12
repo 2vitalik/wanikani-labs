@@ -1,6 +1,11 @@
 # STATUS LOG — wanikani-labs (новіше вгорі)
 
 `2026-09-12` 🤖 Claude
+🟩 Зробили — T18: акаунти в Mongo, tg_users/tg_chats/tg_routes, Fernet, CLI accounts, бот з /accounts /setup /admin і PyMongoStorage; локальна база мігрована й перевірена sync-ом; 38 тестів
+🟨 Далі — твій живий прогін у Telegram (локально), потім vv3 за runbook §9; далі крок 2 T07 (сесії/денний підсумок/стрік, M)
+🟥 Чекає тебе — коміт; BOT_TOKEN + твій id у .env і /accounts; vv3: stop → migrate-keys → gen-key → start → токени через бота → /setup (T18 report)
+
+`2026-09-12` 🤖 Claude
 🟩 Зробили — раунд 2 по акаунтах: T19 (пояснення Fernet/wk_id/FSM, перегляд: tg_chats/tg_routes, без tg_topics, без TG_FORUM_CHAT_ID, FSM у Mongo, міграція ключів), T20 питання
 🟨 Далі — T18 реалізація шарами lib → маршрути → UI (L), старт після ⭐-відповідей
 🟥 Чекає тебе — T20 ⭐ Q1–Q4 (open+block, Fernet, міграція main/light → wk_id[:8], прибрати WK_TOKEN__*/TG_FORUM_CHAT_ID)

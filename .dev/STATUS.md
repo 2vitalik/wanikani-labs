@@ -9,6 +9,6 @@
 ## Агент
 
 `2026-09-12` · Claude
-🟩 Зробили — T18: акаунти в Mongo, tg_users/tg_chats/tg_routes, Fernet, CLI accounts, бот з /accounts /setup /admin і PyMongoStorage; локальна база мігрована й перевірена sync-ом; 38 тестів
-🟨 Далі — твій живий прогін у Telegram (локально), потім vv3 за runbook §9; далі крок 2 T07 (сесії/денний підсумок/стрік, M)
-🟥 Чекає тебе — коміт; BOT_TOKEN + твій id у .env і /accounts; vv3: stop → migrate-keys → gen-key → start → токени через бота → /setup (T18 report)
+🟩 Зробили — дизайн чатів як цілі доставки: модель T22 (реєстр tg_chats з picker/my_chat_member//setup, гілки в чаті, thread_auto, status, subscribers, реєстр налаштувань), UX T23 (/chats, картка, Delivery → чат → гілка, Topics, легкий /setup), варіанти T24, питання T25
+🟨 Далі — після відповідей: задача-тека + фаза 1 (реєстр чатів, picker, /chats, легкий /setup; M), потім фаза 2 (вибір цілі, гілки, налаштування; M)
+🟥 Чекає тебе — відповіді > у T25 (⭐ Q1–Q3); коміт T18 і живий прогін бота (T18 report) досі відкриті
