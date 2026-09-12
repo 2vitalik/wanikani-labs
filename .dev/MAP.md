@@ -2,7 +2,7 @@
 
 <!-- автоген: `dev map` (або `dev gen`), руками не редагувати -->
 
-Наступний вільний ID: **T21** · тікетів: 20 · дерево вузлів — [TREE.md](TREE.md)
+Наступний вільний ID: **T22** · тікетів: 21 · дерево вузлів — [TREE.md](TREE.md)
 
 Типи: `Q`❓ питання · `P`💡 пропозиція · `C`🔆 clarification · `B`🧠 brainstorm · `R`✔️ readback · `S`📝 summary · `D`🗄️ digest (на пенсії) · ⚙️ задача (тека, без літери). state: 🟢/🔴 — чи чекає твоєї відповіді · 🟩/⬜ — чи інтегровано в README вузла.
 
@@ -28,3 +28,4 @@
 | — | [T18](.t/T18--accounts-v1/plan.md) | ⚙️ | accounts-v1 | Акаунти v1: users/accounts/chats/routes + UI бота — план | 🟢 ⬜ |
 | — | [T19](.t/T19-C--accounts-answers.md) | 🔆 | accounts-answers | Відповіді на питання з чату по дизайну акаунтів і що переглянуто | 🟢 ⬜ |
 | — | [T20](.t/T20-Q--accounts-questions-2.md) | ❓ | accounts-questions-2 | Питання раунду 2: доступ, Fernet, міграція ключів, env | 🔴 ⬜ |
+| — | [T21](.t/T21-R--accounts-decisions.md) | ✔️ | accounts-decisions | Readback: рішення по акаунтах (T17, T20, чат 2026-09-12) | 🟢 ⬜ |
