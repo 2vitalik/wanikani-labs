@@ -22,18 +22,14 @@ sudo install -m 640 -o root -g app-$S /dev/null /srv/$S/shared/env
 
 ## 3. env
 
-`deploy/env.example` → `/srv/wanikani-labs/shared/env` (заповнити токени; `TG_ADMIN_IDS` — через кому).
+`deploy/env.example` → `/srv/wanikani-labs/shared/env`: `BOT_TOKEN` (BotFather), `TG_ADMIN_IDS` (через кому), `WKLABS_SECRET_KEY` (`wklabs gen-key`; копію — в 1Password: без нього токени акаунтів не розшифрувати), `ACCESS_POLICY` (`open` за замовчуванням), Mongo. Токенів WaniKani і форуму в env **немає** (T21): акаунти додаються через бота в приваті (`/accounts → ➕`) або `wklabs accounts add`, форум — командою `/setup` у самому форумі.
 
-Без `BOT_TOKEN` бот працює в dry-run: полить WaniKani, але до Telegram не підключається взагалі й на команди не відповідає. Bootstrap у три кроки:
-
-1. `BOT_TOKEN` від @BotFather → `systemctl restart wanikani-labs-bot` (журнал: `bootstrap mode`).
-2. Додати бота у форум адміном (з правом Manage Topics) і написати `/start` у будь-якому топіку: відповідь містить `chat id: -100…` і `your id: …`.
-3. Вписати їх у `TG_FORUM_CHAT_ID` і `TG_ADMIN_IDS` → `restart`. У журналі має бути `forum topics ready`.
+Без `BOT_TOKEN` бот працює в dry-run: полить WaniKani, але до Telegram не підключається і на команди не відповідає. Без `WKLABS_SECRET_KEY` бот не стартує (`wklabs gen-key` → у env → restart).
 
 Перевірити, що заповнено (довжини значень, без самих значень):
 
 ```sh
-sudo awk -F= '/^(BOT_TOKEN|TG_FORUM_CHAT_ID|TG_ADMIN_IDS)=/ {print $1, length($2)}' \
+sudo awk -F= '/^(BOT_TOKEN|TG_ADMIN_IDS|WKLABS_SECRET_KEY)=/ {print $1, length($2)}' \
   /srv/wanikani-labs/shared/env
 ```
 
@@ -70,10 +66,10 @@ sudo etckeeper commit "systemd: add wanikani-labs-bot.service"
 
 ## 6. Перевірка
 
-- `/start` (або `/ping`) у приваті з ботом чи в будь-якому топіку відповідає **будь-кому**: аптайм, час останнього sync і твій Telegram id. Якщо в рядку стоїть `not in TG_ADMIN_IDS` — саме цей id треба дописати в `shared/env` → `TG_ADMIN_IDS` і `systemctl restart wanikani-labs-bot`.
-- Адмін-команди від чужого id бот мовчки ігнорує: `journalctl -u wanikani-labs-bot | grep 'ignored command'` показує, хто стукав. Якщо бот не відповідає нікому — шукати в журналі `TelegramConflictError` (той самий токен поллить ще один процес, напр. локальний `uv run wklabs-bot`).
-- У форумі зʼявились 6 топіків; `/status` у будь-якому топіку від адміна відповідає.
-- Після перших ревʼю в WaniKani — дайджест у `📝 <acc> · reviews` протягом 5 хв.
+- `/ping` у приваті чи в будь-якому чаті відповідає **будь-кому**: аптайм, час останнього sync, твій Telegram id (+ `chat id`/`thread` у групі). Якщо після `/ping` нема слова `admin` — цей id треба дописати в `TG_ADMIN_IDS` → `restart`.
+- `/start` у приваті → `➕ Add account` → вставити токен WaniKani (бот видаляє повідомлення, відповідає «synced: …»). `/accounts` — список і картка акаунта.
+- Форум: додати бота адміном з правом Manage Topics → `/setup` у форумі → галочки акаунтів, `topics per account`, `📚 subjects`, `🛠 system` → Apply: топіки створюються одразу. Після перших ревʼю в WaniKani — дайджест у `📝 <label> · reviews` протягом 5 хв.
+- Хто стукав, а бот проігнорував: `journalctl -u wanikani-labs-bot | grep 'ignored update'`. Бот не відповідає нікому — шукати `TelegramConflictError` (той самий токен поллить ще один процес, напр. локальний `uv run wklabs-bot`).
 
 ## 7. Редеплой
 
@@ -116,3 +112,19 @@ mongorestore --host 127.0.0.1 --username wanikani_labs \
   --authenticationDatabase wanikani_labs --gzip \
   --archive=/tmp/history.gz --nsInclude wanikani_labs.history
 ``` Далі — `mongodump --db wanikani_labs --collection history` → `mongorestore` на vv3 (через ssh-тунель), далі `wklabs rebuild-events -y` на сервері. Або rsync файлів (1.6 GB) і `wklabs import-files` там — диск 17 GB вільних, але перший варіант ощадніший.
+
+## 9. Акаунти з env у Mongo (разово, 2026-09)
+
+Після редеплою коду з T18 акаунти живуть у Mongo під ключами `wk_id[:8]`; старі `main`/`light` у даних треба перейменувати **до** старту нового бота (бот зупинений):
+
+```sh
+sudo systemctl stop wanikani-labs-bot
+W=/srv/wanikani-labs/venv/bin/wklabs
+E=WKLABS_ENV_FILE=/srv/wanikani-labs/shared/env
+sudo $E $W accounts migrate-keys --dry-run   # main → 07fff792, light → 27f9b9f5
+sudo $E $W accounts migrate-keys
+sudo $E $W gen-key                            # → WKLABS_SECRET_KEY у shared/env (+ 1Password)
+sudo systemctl start wanikani-labs-bot
+```
+
+Далі в приваті з ботом: `/accounts → ➕ Add account` → токен `main`, потім `light` — бот упізнає акаунти за `wk_id`, ключі збігаються з мігрованими, `sync_state` на місці → інкремент продовжується без baseline. Рядки `WK_TOKEN__*` і `TG_FORUM_CHAT_ID` з `shared/env` прибрати (їх більше ніхто не читає). Форум — `/setup` у ньому (§6).
