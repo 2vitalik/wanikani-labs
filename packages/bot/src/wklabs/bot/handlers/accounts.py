@@ -1,4 +1,4 @@
-"""/accounts (private): list → card → add · rename · replace token · pause · remove · delivery."""
+"""/accounts (private): list → card → add · rename · replace token · pause · remove."""
 
 from __future__ import annotations
 
@@ -8,36 +8,23 @@ from aiogram import F, Router
 from aiogram.enums import ChatType
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
-from bson import ObjectId
-from bson.errors import InvalidId
+from aiogram.types import CallbackQuery, Message
 
 from wklabs.lib.accounts import (
     ACTIVE,
     PAUSED,
     REMOVED,
-    Account,
     InvalidTokenError,
     looks_like_token,
     validate_token,
 )
-from wklabs.lib.chats import Chat
-from wklabs.lib.delivery import PRESET_GENERAL, PRESET_PER_CATEGORY, Route
 from wklabs.lib.users import TgUser
 
 from .. import texts
-from ..callbacks import AccCb, AddAccount, NavCb, Rename, RouteCb
+from ..callbacks import AccCb, AddAccount, NavCb, Rename
 from ..context import AppContext
-from ..keyboards import kb_back_accounts, kb_cancel, kb_delivery, kb_remove_confirm
-from .common import (
-    accounts_screen,
-    as_int,
-    card_screen,
-    edit,
-    owned,
-    routes_with_chats,
-    visible_chat,
-)
+from ..keyboards import kb_back_accounts, kb_cancel, kb_remove_confirm
+from .common import accounts_screen, card_screen, edit, owned
 
 log = logging.getLogger(__name__)
 router = Router(name="accounts")
@@ -230,97 +217,3 @@ async def cb_remove_yes(
     await ctx.accounts.remove(acc.key)
     await ctx.routes.suspend_account(acc.key)
     await edit(cb, texts.removed(acc), kb_back_accounts())
-
-
-# ----------------------------------------------------------------- delivery
-async def delivery_screen(ctx: AppContext, acc: Account) -> tuple[str, InlineKeyboardMarkup]:
-    all_routes = await routes_with_chats(ctx, acc, include_disabled=True)
-    chat_ids = sorted({c.id for r, c in all_routes if r.enabled})
-    if not chat_ids and acc.owner_tg_id is not None:
-        chat_ids = [acc.owner_tg_id]
-    rows = [(r, c) for r, c in all_routes if c.id in chat_ids]
-    subjects: list[tuple[Chat, Route | None]] = []
-    for cid in chat_ids:
-        chat = await ctx.chats.get(cid)
-        if chat is None:
-            chat = await ctx.chats.ensure_private(cid)
-        found = [
-            r
-            for r in await ctx.routes.for_chat(cid, include_disabled=True)
-            if r.account is None and r.category == "subjects"
-        ]
-        subjects.append((chat, found[0] if found else None))
-    owner_chats = await ctx.chats.visible_to(acc.owner_tg_id) if acc.owner_tg_id else []
-    move_to = [c for c in owner_chats if c.id not in chat_ids and c.present and c.can_post]
-    return texts.delivery(acc, rows), kb_delivery(acc, rows, subjects, move_to)
-
-
-@router.callback_query(AccCb.filter(F.action == "delivery"))
-async def cb_delivery(
-    cb: CallbackQuery, callback_data: AccCb, ctx: AppContext, user: TgUser
-) -> None:
-    acc = await owned(ctx, cb, user, callback_data.key)
-    if acc is None:
-        return
-    text, kb = await delivery_screen(ctx, acc)
-    await edit(cb, text, kb)
-
-
-@router.callback_query(RouteCb.filter())
-async def cb_route_toggle(
-    cb: CallbackQuery, callback_data: RouteCb, ctx: AppContext, user: TgUser
-) -> None:
-    try:
-        route = await ctx.routes.get(ObjectId(callback_data.id))
-    except InvalidId:
-        route = None
-    if route is None or route.account is None:
-        await cb.answer("route not found", show_alert=True)
-        return
-    acc = await owned(ctx, cb, user, route.account)
-    if acc is None:
-        return
-    await ctx.routes.set_enabled(route.id, not route.enabled)
-    text, kb = await delivery_screen(ctx, acc)
-    await edit(cb, text, kb)
-
-
-async def _user_chat(ctx: AppContext, user: TgUser, chat_id: int) -> Chat | None:
-    return await visible_chat(ctx, user, chat_id)
-
-
-@router.callback_query(AccCb.filter(F.action == "subj"))
-async def cb_subjects_toggle(
-    cb: CallbackQuery, callback_data: AccCb, ctx: AppContext, user: TgUser
-) -> None:
-    acc = await owned(ctx, cb, user, callback_data.key)
-    if acc is None:
-        return
-    chat = await _user_chat(ctx, user, as_int(callback_data.arg))
-    if chat is None:
-        await cb.answer("not your chat", show_alert=True)
-        return
-    current = [
-        r
-        for r in await ctx.routes.for_chat(chat.id, include_disabled=True)
-        if r.account is None and r.category == "subjects"
-    ]
-    enabled = not (current and current[0].enabled)
-    await ctx.routes.upsert(None, "subjects", chat.id, created_by=user.id, enabled=enabled)
-    text, kb = await delivery_screen(ctx, acc)
-    await edit(cb, text, kb)
-
-
-@router.callback_query(AccCb.filter(F.action == "move"))
-async def cb_move(cb: CallbackQuery, callback_data: AccCb, ctx: AppContext, user: TgUser) -> None:
-    acc = await owned(ctx, cb, user, callback_data.key)
-    if acc is None:
-        return
-    chat = await _user_chat(ctx, user, as_int(callback_data.arg))
-    if chat is None:
-        await cb.answer("not your chat", show_alert=True)
-        return
-    preset = chat.preset or (PRESET_PER_CATEGORY if chat.topics_possible else PRESET_GENERAL)
-    await ctx.topics.apply_preset(chat, [acc], preset, by=user.id)
-    text, kb = await delivery_screen(ctx, acc)
-    await edit(cb, text, kb)

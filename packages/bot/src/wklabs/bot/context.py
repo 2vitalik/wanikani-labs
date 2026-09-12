@@ -43,6 +43,8 @@ class AppContext:
     last_error_notified_at: datetime | None = None
     failing: bool = False
     started_at: datetime = field(default_factory=utcnow)
+    # (chat_id, user_id) → (is chat admin, monotonic time); one get_chat_member per minute
+    admin_cache: dict[tuple[int, int], tuple[bool, float]] = field(default_factory=dict)
 
     def is_admin(self, tg_id: int | None) -> bool:
         return tg_id is not None and tg_id in self.settings.tg_admin_ids

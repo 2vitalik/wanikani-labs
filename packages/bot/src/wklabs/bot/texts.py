@@ -17,6 +17,7 @@ from wklabs.lib.chats import (
     HINT_NOT_FORUM,
     HINT_UNKNOWN,
     Chat,
+    Topic,
     hints,
 )
 from wklabs.lib.delivery import (
@@ -28,6 +29,7 @@ from wklabs.lib.delivery import (
     PRESET_LABEL,
     Route,
 )
+from wklabs.lib.route_settings import help_line
 from wklabs.lib.sync import SyncResult
 from wklabs.lib.users import PENDING, TgUser
 
@@ -224,18 +226,124 @@ def removed(acc: Account) -> str:
     return f"🗑 <b>{e(acc.label)}</b> removed. Data kept; add the token again to revive."
 
 
+def _where(route: Route, chat: Chat) -> str:
+    where = e(chat.name)
+    if route.thread_id is not None and route.thread_title:
+        where += f" › {e(route.thread_title)}"
+    return where
+
+
 def delivery(acc: Account, rows: list[tuple[Route, Chat]]) -> str:
     lines = [f"📬 <b>Delivery — {e(acc.label)}</b>"]
     if not rows:
         lines.append("no routes yet")
     for r, chat in rows:
-        where = e(chat.name) + (f" › {e(r.thread_title)}" if r.thread_title else "")
-        icon = CATEGORY_ICON.get(r.category, "•")
-        lines.append(f"{'✅' if r.enabled else '🚫'} {icon} {r.category} → {where}")
+        marks = " 🔕" if r.settings.get("silent") else ""
+        marks += f" ⚠️ {e(r.error)}" if r.has_error else ""
+        lines.append(f"{r.icon} {r.category} → {_where(r, chat)}{marks}")
     lines.append("")
-    lines.append("📚 subjects = WaniKani content changes (per chat).")
-    lines.append("+ another chat: ➕ Add a chat (or /setup there).")
+    lines.append(
+        "Tap a category to change where it goes or how. 📚 subjects = WaniKani content "
+        "changes, shared per chat."
+    )
     return "\n".join(lines)
+
+
+def category_screen(acc: Account, category: str, rows: list[tuple[Route, Chat]]) -> str:
+    icon = CATEGORY_ICON.get(category, "•")
+    lines = [f"{icon} <b>{category} — {e(acc.label)}</b>"]
+    if not rows:
+        lines.append("goes nowhere yet — ➕ Also deliver to…")
+    else:
+        lines.append("Tap a target to switch it on/off, change the topic or settings.")
+    return "\n".join(lines)
+
+
+def route_card(
+    route: Route, chat: Chat, label: str | None, *, note: str | None = None, view_only: bool = False
+) -> str:
+    lines = []
+    if note:
+        lines.append(note)
+    head = f"{route.icon} <b>{route.category}</b>" + (f" — {e(label)}" if label else "")
+    lines.append(head)
+    where = f"→ {_where(route, chat)}" + ("" if route.enabled else " · off")
+    if route.account is None:
+        n = len(route.subscribers)
+        where += f" · {n} subscriber{'s' if n != 1 else ''}"
+    lines.append(where)
+    if route.has_error:
+        lines.append(f"⚠️ {ROUTE_ERRORS.get(route.error or '', e(route.error))}")
+    if view_only:
+        lines.append("view only — not your account")
+    else:
+        lines.append(help_line(route.category))
+    return "\n".join(lines)
+
+
+def pick_chat_target(label: str | None, category: str, *, mode: str) -> str:
+    what = f"{CATEGORY_ICON.get(category, '•')} {category}" + (f" of {e(label)}" if label else "")
+    if mode == "all":
+        return f"Move all digests of <b>{e(label)}</b> to…"
+    if mode == "add":
+        return f"Also deliver {what} to…"
+    return f"Where should {what} go?"
+
+
+def pick_topic(chat: Chat, category: str) -> str:
+    lines = [
+        f"🗂 <b>{e(chat.name)}</b> — which topic for {CATEGORY_ICON.get(category, '•')} {category}?"
+    ]
+    if chat.topics_possible:
+        lines.append("Auto topics follow the account name; picked ones I never rename or delete.")
+    else:
+        lines.append("I can't create topics here (see /chats) — pick a known one or General.")
+    return "\n".join(lines)
+
+
+def target_set(route: Route, chat: Chat) -> str:
+    return f"✅ → {_where(route, chat)}"
+
+
+def stale() -> str:
+    return "This screen is stale — open 📬 Delivery again."
+
+
+def not_allowed() -> str:
+    return "not allowed for this route"
+
+
+def routes_here(chat: Chat, n: int) -> str:
+    return (
+        f"🧭 <b>Routes into {e(chat.name)}</b> · {n}\n"
+        "Tap one to change it (your own, or any if you admin this chat)."
+    )
+
+
+def topic_name_prompt(chat: Chat, rename: Topic | None) -> str:
+    if rename:
+        return f"✏️ New name for «{e(rename.name)}» in {e(chat.name)} (1–128 chars):"
+    return f"➕ Name for the new topic in {e(chat.name)} (1–128 chars):"
+
+
+def topic_name_bad() -> str:
+    return "Topic name must be 1–128 characters. Try again or ✖️ Cancel."
+
+
+def topic_created(name: str) -> str:
+    return f"✅ Topic «{e(name)}» created."
+
+
+def topic_renamed(old: str, new: str) -> str:
+    return f"✅ «{e(old)}» → «{e(new)}»."
+
+
+def topic_failed(exc: Exception) -> str:
+    return f"❌ Telegram refused: {e(exc)}"
+
+
+def rename_pick(chat: Chat) -> str:
+    return f"✏️ Which topic in {e(chat.name)} to rename? (mine, or any if you admin the chat)"
 
 
 # ------------------------------------------------------------------ chats
@@ -314,6 +422,11 @@ def chat_card(
                 who = f" · {e(acc.label)}" + ("" if acc.owner_tg_id == viewer else " (theirs)")
             where = f" → {e(r.thread_title)}" if r.thread_id is not None and r.thread_title else ""
             err = f" ⚠️ {e(r.error)}" if r.has_error else ""
+            if acc is None and r.subscribers:
+                me = viewer in r.subscribers
+                others = len(r.subscribers) - (1 if me else 0)
+                who = " · you" if me else ""
+                who += f" + {others}" if others else ""
             lines.append(f"{r.icon} {r.category}{who}{where}{err}")
         if len(owners) > 1:
             lines.append(f"{len(owners)} people deliver here")
@@ -407,8 +520,8 @@ def topics_list(chat: Chat) -> str:
         lines.append(f"• {e(t.name)}{tags}")
     lines.append("")
     lines.append(
-        "I only see topics I created or saw messages in — post anything in a topic "
-        "and it appears here. New topics: via a preset (📬 Deliver here…) for now."
+        "I only see topics I created or saw messages in — post anything in a topic and it "
+        "appears here."
     )
     if not chat.topics_possible:
         lines.extend(hint_lines(chat))

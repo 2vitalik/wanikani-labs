@@ -8,18 +8,34 @@ from aiogram.fsm.state import State, StatesGroup
 
 class AccCb(CallbackData, prefix="acc"):
     key: str
-    action: str  # card delivery rename token pause resume remove remove_yes move subj
+    # card delivery rename token pause resume remove remove_yes · cat add moveall subj
+    action: str
     arg: str = ""
 
 
 class RouteCb(CallbackData, prefix="rt"):
     id: str  # ObjectId hex
-    action: str = "toggle"  # toggle recreate
+    action: str = "toggle"  # card toggle set target test recreate
+    arg: str = ""
+
+
+class TargetCb(CallbackData, prefix="tgt"):
+    """Target picker step (context lives in the PickTarget FSM data)."""
+
+    chat: int  # 0 = back to the chat step
+    thread: str = ""  # "" = pick a topic (forum) or General · g General · a auto · n new · <id>
+
+
+class TopicCb(CallbackData, prefix="tp"):
+    chat: int
+    thread: int = 0
+    action: str = "rename"
 
 
 class ChatCb(CallbackData, prefix="ch"):
     chat: int
     # card deliver preset test refresh topics stop stop_yes forget close later
+    # routes subj sys newtopic rename
     action: str
     arg: str = ""
 
@@ -39,3 +55,14 @@ class AddAccount(StatesGroup):
 
 class Rename(StatesGroup):
     label = State()  # data: {"key": key}
+
+
+class PickTarget(StatesGroup):
+    """Where a route goes: chat, then (forum) topic. data: key · cat · mode mv|add|all · route."""
+
+    chat = State()
+    topic = State()
+
+
+class TopicName(StatesGroup):
+    name = State()  # data: {"chat": id, "thread": id | 0 (new), "resume": PickTarget data | None}

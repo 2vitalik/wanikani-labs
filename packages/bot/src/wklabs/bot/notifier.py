@@ -30,6 +30,7 @@ from wklabs.lib.delivery import (
     Route,
     RouteRepo,
 )
+from wklabs.lib.route_settings import effective
 from wklabs.lib.subjects import load_subjects
 from wklabs.lib.timeutil import utcnow
 from wklabs.lib.users import TgUserRepo
@@ -114,12 +115,18 @@ class Notifier:
             subject_ids = {int(e["subject_id"]) for e in evs if e.get("subject_id") is not None}
             subjects = await load_subjects(self.db, subject_ids)
             label = labels.get(account, account) if account else None
-            texts_ = render(category, label, evs, subjects, self.tz)
+            rendered: dict[str, list[str]] = {}
             for route in routes:
                 todo = [e for e in evs if route.id not in (e.get("delivered") or [])]
                 if not todo:
                     continue
-                msg_ids = await self.send_route(route, texts_)
+                opts = effective(route)
+                items = str(opts.get("items", "all"))
+                if items not in rendered:
+                    rendered[items] = render(category, label, evs, subjects, self.tz, items=items)
+                msg_ids = await self.send_route(
+                    route, rendered[items], silent=bool(opts.get("silent"))
+                )
                 await self.db.events.update_many(
                     {"_id": {"$in": [e["_id"] for e in todo]}},
                     {
@@ -138,11 +145,15 @@ class Notifier:
         )
 
     # ------------------------------------------------------------- send
-    async def send_route(self, route: Route, texts_: list[str]) -> list[int]:
+    async def send_route(
+        self, route: Route, texts_: list[str], *, silent: bool = False
+    ) -> list[int]:
         thread = await self.topics.ensure_thread(route)
         ids: list[int] = []
         for t in texts_:
-            mid, err = await self.send_one(route.chat_id, thread, t, meta={"route": route.id})
+            mid, err = await self.send_one(
+                route.chat_id, thread, t, meta={"route": route.id}, silent=silent
+            )
             if err is not None:
                 await self._route_failed(route, err)
                 return ids
@@ -201,6 +212,7 @@ class Notifier:
         *,
         meta: Json | None = None,
         reply_markup: InlineKeyboardMarkup | None = None,
+        silent: bool = False,
     ) -> tuple[int | None, str | None]:
         """One message → (message id, None) or (None, error code). Dry-run logs."""
         if self.bot is None:
@@ -214,6 +226,7 @@ class Notifier:
                     message_thread_id=thread_id,
                     link_preview_options=NO_PREVIEW,
                     reply_markup=reply_markup,
+                    disable_notification=silent or None,
                 )
             except TelegramRetryAfter as exc:
                 log.warning("flood wait %ss", exc.retry_after)

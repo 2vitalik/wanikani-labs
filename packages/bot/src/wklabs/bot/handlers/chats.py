@@ -25,23 +25,36 @@ from wklabs.lib.chats import (
     VIA_SETUP,
     Chat,
 )
-from wklabs.lib.delivery import PRESETS
+from wklabs.lib.delivery import BLUE, PRESETS
 from wklabs.lib.users import TgUser
 
 from .. import texts
-from ..callbacks import ChatCb, NavCb, RouteCb
+from ..callbacks import ChatCb, NavCb, RouteCb, TopicCb, TopicName
 from ..chat_inspect import inspect_chat
 from ..context import AppContext
 from ..keyboards import (
     PICK_CANCEL,
     PICK_CHANNEL,
     kb_back_chats,
+    kb_cancel,
     kb_pick_chat,
     kb_presets,
+    kb_rename_pick,
+    kb_routes_here,
     kb_stop_confirm,
     kb_topics,
 )
-from .common import chat_card_screen, chats_screen, edit, in_group, visible_or_alert
+from .common import (
+    chat_card_screen,
+    chat_rows,
+    chats_screen,
+    edit,
+    in_group,
+    is_chat_admin,
+    visible_chat,
+    visible_or_alert,
+)
+from .delivery import resume_target
 
 log = logging.getLogger(__name__)
 router = Router(name="chats")
@@ -69,8 +82,6 @@ async def cmd_start_chat(message: Message, ctx: AppContext, user: TgUser, bot: B
         chat_id = int((message.text or "").split("chat_", 1)[1])
     except (IndexError, ValueError):
         chat_id = 0
-    from .common import visible_chat
-
     chat = await visible_chat(ctx, user, chat_id, bot=bot)
     if chat is None:
         text, kb = await chats_screen(ctx, user)
@@ -204,7 +215,157 @@ async def cb_topics(
     chat = await visible_or_alert(ctx, cb, user, callback_data.chat, bot=bot)
     if chat is None:
         return
-    await edit(cb, texts.topics_list(chat), kb_topics(chat))
+    renamable = await _renamable(ctx, user, chat, bot)
+    await edit(cb, texts.topics_list(chat), kb_topics(chat, renamable=bool(renamable)))
+
+
+async def _renamable(ctx: AppContext, user: TgUser, chat: Chat, bot: Bot) -> list:
+    """Topics this user may rename through the bot: the bot's own, or all for chat admins."""
+    if not chat.topics_possible or not chat.topics:
+        return []
+    if user.is_admin or await is_chat_admin(ctx, chat.id, user.id, bot):
+        return sorted(chat.topics.values(), key=lambda t: t.thread_id)
+    return sorted((t for t in chat.topics.values() if t.by_bot), key=lambda t: t.thread_id)
+
+
+@router.callback_query(ChatCb.filter(F.action == "newtopic"))
+async def cb_newtopic(
+    cb: CallbackQuery,
+    callback_data: ChatCb,
+    ctx: AppContext,
+    user: TgUser,
+    state: FSMContext,
+    bot: Bot,
+) -> None:
+    chat = await visible_or_alert(ctx, cb, user, callback_data.chat, bot=bot)
+    if chat is None:
+        return
+    if not chat.topics_possible:
+        await cb.answer("I can't create topics here — see the hint on the card", show_alert=True)
+        return
+    await state.set_state(TopicName.name)
+    await state.update_data(topic={"chat": chat.id, "thread": 0, "resume": None})
+    await edit(cb, texts.topic_name_prompt(chat, None), kb_cancel())
+
+
+@router.callback_query(ChatCb.filter(F.action == "rename"))
+async def cb_rename_pick(
+    cb: CallbackQuery, callback_data: ChatCb, ctx: AppContext, user: TgUser, bot: Bot
+) -> None:
+    chat = await visible_or_alert(ctx, cb, user, callback_data.chat, bot=bot)
+    if chat is None:
+        return
+    topics = await _renamable(ctx, user, chat, bot)
+    if not topics:
+        await cb.answer("nothing I may rename here", show_alert=True)
+        return
+    await edit(cb, texts.rename_pick(chat), kb_rename_pick(chat, topics))
+
+
+@router.callback_query(TopicCb.filter(F.action == "rename"))
+async def cb_rename_topic(
+    cb: CallbackQuery,
+    callback_data: TopicCb,
+    ctx: AppContext,
+    user: TgUser,
+    state: FSMContext,
+    bot: Bot,
+) -> None:
+    chat = await visible_or_alert(ctx, cb, user, callback_data.chat, bot=bot)
+    if chat is None:
+        return
+    topic = chat.topic(callback_data.thread)
+    if topic is None or topic not in await _renamable(ctx, user, chat, bot):
+        await cb.answer(texts.not_allowed(), show_alert=True)
+        return
+    await state.set_state(TopicName.name)
+    await state.update_data(topic={"chat": chat.id, "thread": topic.thread_id, "resume": None})
+    await edit(cb, texts.topic_name_prompt(chat, topic), kb_cancel())
+
+
+@router.message(TopicName.name, F.text)
+async def msg_topic_name(
+    message: Message, ctx: AppContext, user: TgUser, state: FSMContext, bot: Bot
+) -> None:
+    data = dict((await state.get_data()).get("topic") or {})
+    chat = await visible_chat(ctx, user, int(data.get("chat") or 0), bot=bot)
+    if chat is None:
+        await state.clear()
+        await message.answer(texts.stale(), reply_markup=kb_back_chats())
+        return
+    name = (message.text or "").strip()
+    if not 1 <= len(name) <= 128:
+        await message.answer(texts.topic_name_bad(), reply_markup=kb_cancel())
+        return
+    await state.clear()
+    thread = int(data.get("thread") or 0)
+    try:
+        if thread:
+            old = chat.topic(thread)
+            ok = await ctx.topics.rename(chat.id, thread, name)
+            note = (
+                texts.topic_renamed(old.name if old else str(thread), name)
+                if ok
+                else "❌ rename failed"
+            )
+            topic_id = thread
+        else:
+            topic = await ctx.topics.create(chat.id, name, color=BLUE)
+            note, topic_id = texts.topic_created(name), topic.thread_id
+    except Exception as exc:
+        log.exception("topic op failed in %s", chat.id)
+        await message.answer(texts.topic_failed(exc), reply_markup=kb_back_chats())
+        return
+    resume = data.get("resume")
+    if resume:
+        fresh = await ctx.chats.get(chat.id) or chat
+        await resume_target(ctx, user, message, dict(resume), fresh, topic_id, name)
+        return
+    fresh = await ctx.chats.get(chat.id) or chat
+    renamable = await _renamable(ctx, user, fresh, bot)
+    await message.answer(
+        f"{note}\n{texts.topics_list(fresh)}",
+        reply_markup=kb_topics(fresh, renamable=bool(renamable)),
+    )
+
+
+# ------------------------------------------------- routes here / subscriptions
+@router.callback_query(ChatCb.filter(F.action == "routes"))
+async def cb_routes_here(
+    cb: CallbackQuery, callback_data: ChatCb, ctx: AppContext, user: TgUser, bot: Bot
+) -> None:
+    chat = await visible_or_alert(ctx, cb, user, callback_data.chat, bot=bot)
+    if chat is None:
+        return
+    rows = await chat_rows(ctx, chat)
+    await edit(cb, texts.routes_here(chat, len(rows)), kb_routes_here(chat, rows))
+
+
+@router.callback_query(ChatCb.filter(F.action.in_({"subj", "sys"})))
+async def cb_global_toggle(
+    cb: CallbackQuery, callback_data: ChatCb, ctx: AppContext, user: TgUser, bot: Bot
+) -> None:
+    chat = await visible_or_alert(ctx, cb, user, callback_data.chat, bot=bot)
+    if chat is None:
+        return
+    category = "subjects" if callback_data.action == "subj" else "system"
+    if category == "system" and not user.is_admin:
+        await cb.answer(texts.not_allowed(), show_alert=True)
+        return
+    current = next(
+        (
+            r
+            for r in await ctx.routes.for_chat(chat.id, include_disabled=True)
+            if r.account is None and r.category == category
+        ),
+        None,
+    )
+    if current and user.id in current.subscribers:
+        await ctx.routes.unsubscribe(category, chat.id, user.id)
+    else:
+        await ctx.routes.subscribe(category, chat.id, user.id)
+    text, kb = await chat_card_screen(ctx, user, chat, in_group=in_group(cb))
+    await edit(cb, text, kb)
 
 
 # ------------------------------------------------------- stop / forget

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import time
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -16,13 +18,22 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from wklabs.lib.accounts import PURGED, Account
 from wklabs.lib.chats import PRIVATE, VIA_VERIFIED, Chat
 from wklabs.lib.delivery import Route
+from wklabs.lib.route_settings import effective, for_category
 from wklabs.lib.timeutil import utcnow
 from wklabs.lib.users import TgUser
 
 from .. import texts
+from ..callbacks import AccCb, ChatCb
 from ..chat_inspect import verify_member
 from ..context import AppContext
-from ..keyboards import kb_account_card, kb_accounts, kb_chat_card, kb_chats, kb_welcome
+from ..keyboards import (
+    kb_account_card,
+    kb_accounts,
+    kb_chat_card,
+    kb_chats,
+    kb_route,
+    kb_welcome,
+)
 
 log = logging.getLogger(__name__)
 
@@ -162,8 +173,17 @@ async def chat_card_screen(
     mine = await ctx.accounts.for_owner(user.id)
     keys = {a.key for a in mine}
     has_routes = any(r.account in keys for r, _ in rows)
+    subj = next((r for r, _ in rows if r.account is None and r.category == "subjects"), None)
+    sys_ = next((r for r, _ in rows if r.account is None and r.category == "system"), None)
     return texts.chat_card(chat, rows, viewer=user.id, note=note), kb_chat_card(
-        chat, has_accounts=bool(mine), has_routes=has_routes, in_group=in_group
+        chat,
+        has_accounts=bool(mine),
+        has_routes=has_routes,
+        in_group=in_group,
+        any_routes=bool(rows),
+        subjects_on=bool(subj and subj.enabled and user.id in subj.subscribers),
+        system_on=bool(sys_ and sys_.enabled and user.id in sys_.subscribers),
+        is_admin=user.is_admin,
     )
 
 
@@ -176,3 +196,97 @@ def as_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+# ------------------------------------------------------------- permissions
+@dataclass(frozen=True, slots=True)
+class Perm:
+    """What a user may do with a route (T26 §5)."""
+
+    toggle: bool = False
+    settings: bool = False
+    target_here: bool = False  # another topic in the same chat
+    target_any: bool = False  # another chat
+
+    @property
+    def target(self) -> bool:
+        return self.target_here or self.target_any
+
+    @property
+    def any(self) -> bool:
+        return self.toggle or self.settings or self.target
+
+
+FULL = Perm(True, True, True, True)
+CHAT_ADMIN = Perm(toggle=True, settings=True, target_here=True)
+VIEW = Perm()
+ADMIN_TTL = 60.0
+
+
+async def is_chat_admin(ctx: AppContext, chat_id: int, user_id: int, bot: Bot | None) -> bool:
+    bot = bot or ctx.bot
+    if bot is None:
+        return False
+    now = time.monotonic()
+    cached = ctx.admin_cache.get((chat_id, user_id))
+    if cached and now - cached[1] < ADMIN_TTL:
+        return cached[0]
+    try:
+        m = await bot.get_chat_member(chat_id, user_id)
+        status = getattr(m, "status", "member")
+        ok = str(getattr(status, "value", status)) in ("creator", "administrator")
+    except Exception:
+        ok = False
+    ctx.admin_cache[(chat_id, user_id)] = (ok, now)
+    return ok
+
+
+async def can_edit(ctx: AppContext, user: TgUser, route: Route, *, bot: Bot | None) -> Perm:
+    if user.is_admin:
+        return FULL
+    if route.account is not None:
+        acc = await ctx.accounts.get(route.account)
+        if acc is not None and acc.owner_tg_id == user.id:
+            return FULL
+    else:
+        # global category: your own subscription and the shared settings are yours to touch
+        chat = await ctx.chats.get(route.chat_id)
+        if chat is not None and chat.is_member(user.id):
+            return Perm(toggle=True, settings=True)
+    chat = await ctx.chats.get(route.chat_id)
+    if chat is not None and not chat.is_private and await is_chat_admin(ctx, chat.id, user.id, bot):
+        return CHAT_ADMIN
+    return VIEW
+
+
+async def route_screen(
+    ctx: AppContext,
+    user: TgUser,
+    route: Route,
+    *,
+    bot: Bot | None,
+    back_text: str,
+    back_cb: AccCb | ChatCb,
+    note: str | None = None,
+) -> tuple[str, InlineKeyboardMarkup]:
+    chat = await ctx.chats.get(route.chat_id) or Chat.from_doc(
+        {"_id": route.chat_id, "type": PRIVATE}
+    )
+    label = None
+    if route.account:
+        acc = await ctx.accounts.get(route.account)
+        label = acc.label if acc else route.account
+    perm = await can_edit(ctx, user, route, bot=bot)
+    opts = effective(route)
+    settings = [(s, opts[s.key]) for s in for_category(route.category)]
+    text = texts.route_card(route, chat, label, note=note, view_only=not perm.any)
+    kb = kb_route(
+        route,
+        settings,
+        can_toggle=perm.toggle,
+        can_settings=perm.settings,
+        can_target=perm.target,
+        back_text=back_text,
+        back_cb=back_cb,
+    )
+    return text, kb

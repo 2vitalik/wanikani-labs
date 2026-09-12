@@ -76,8 +76,14 @@ def _chunk(header: str, lines: list[str], footer: str = "") -> list[str]:
 
 # ---------------------------------------------------------------- reviews
 def render_reviews(
-    label: str, events: list[Json], subjects: dict[int, Json], tz: ZoneInfo
+    label: str,
+    events: list[Json],
+    subjects: dict[int, Json],
+    tz: ZoneInfo,
+    *,
+    items: str = "all",
 ) -> list[str]:
+    """`items`: all · wrong (only ❌ and SRS drops) · none (header with counts only)."""
     by_subject: dict[int, dict[str, Json]] = defaultdict(dict)
     unlocked: list[Json] = []
     started: list[Json] = []
@@ -127,6 +133,9 @@ def render_reviews(
         mv = g.get("srs_up") or g.get("srs_down")
         ev = rv or mv
         assert ev is not None
+        bad = bool(rv and not rv["meta"].get("correct")) or "srs_down" in g
+        if items == "none" or (items == "wrong" and not bad):
+            continue
         mark = ("✅" if rv["meta"].get("correct") else "❌") if rv else "•"
         s = f"{mark} {_subject(ev, subjects)}"
         if mv:
@@ -136,13 +145,13 @@ def render_reviews(
             mw, rw = rv["meta"].get("meaning_wrong", 0), rv["meta"].get("reading_wrong", 0)
             s += f" (m{mw} r{rw})"
         lines.append(s)
-    if started:
+    if started and items == "all":
         lines.append(
             "📖 lessons: "
             + ", ".join(_subject(e, subjects) for e in started[:30])
             + (f" … +{len(started) - 30}" if len(started) > 30 else "")
         )
-    if unlocked:
+    if unlocked and items == "all":
         lines.append(
             "🔓 unlocked: "
             + ", ".join(_subject(e, subjects) for e in unlocked[:30])
@@ -215,11 +224,13 @@ def render(
     events: list[Json],
     subjects: dict[int, Json],
     tz: ZoneInfo,
+    *,
+    items: str = "all",
 ) -> list[str]:
     if category == "subjects":
         return render_subjects(events, subjects, tz)
     if category == "reviews":
-        return render_reviews(label or "?", events, subjects, tz)
+        return render_reviews(label or "?", events, subjects, tz, items=items)
     if category == "milestones":
         return render_milestones(label or "?", events, subjects, tz)
     return []

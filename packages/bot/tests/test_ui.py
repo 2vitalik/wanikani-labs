@@ -112,17 +112,22 @@ def test_chat_keyboards():
     assert labels(kb)[0] == "🔒 private · here"
     assert labels(kb)[1] == "🗂 WK · forum · 2 ✓" and labels(kb)[2] == "⚠️ WK · removed me"
     assert labels(kb)[-1] == "➕ Add a chat"
-    kb = kb_chat_card(chat(), has_accounts=True, has_routes=True, in_group=False)
+    kb = kb_chat_card(
+        chat(), has_accounts=True, has_routes=True, in_group=False, any_routes=True, is_admin=True
+    )
     assert labels(kb) == [
         "📬 Deliver here…",
         "🧵 Topics",
         "📨 Send test",
+        "🧭 Routes here",
+        "📚 Subjects: off",
+        "🛠 System: off",
         "🔄 Refresh",
         "🚫 Stop here",
         "« Chats",
     ]
     kb = kb_chat_card(chat(is_forum=False), has_accounts=False, has_routes=False, in_group=True)
-    assert labels(kb) == ["📨 Send test", "🔄 Refresh", "🧹 Close"]
+    assert labels(kb) == ["📨 Send test", "📚 Subjects: off", "🔄 Refresh", "🧹 Close"]
     kb = kb_chat_card(chat(status=KICKED), has_accounts=True, has_routes=True, in_group=False)
     assert labels(kb) == ["🔄 Refresh", "🚫 Stop here", "🗑 Forget", "« Chats"]
     assert labels(kb_presets(chat()))[:4] == [
