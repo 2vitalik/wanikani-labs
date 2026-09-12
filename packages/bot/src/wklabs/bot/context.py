@@ -10,10 +10,13 @@ from html import escape
 
 from aiogram import Bot
 
+from wklabs.lib.accounts import AccountRepo
 from wklabs.lib.db import Db
+from wklabs.lib.delivery import ChatRepo, RouteRepo
 from wklabs.lib.settings import Settings
 from wklabs.lib.sync import SyncEngine, SyncResult
 from wklabs.lib.timeutil import utcnow
+from wklabs.lib.users import TgUserRepo
 
 from .notifier import Notifier
 from .topics import TopicManager
@@ -26,22 +29,38 @@ class AppContext:
     settings: Settings
     db: Db
     engine: SyncEngine
+    accounts: AccountRepo
+    users: TgUserRepo
+    chats: ChatRepo
+    routes: RouteRepo
     topics: TopicManager
     notifier: Notifier
     bot: Bot | None = None
+    bot_username: str = ""
     sync_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     last_result: SyncResult | None = None
     last_error_notified_at: datetime | None = None
     failing: bool = False
     started_at: datetime = field(default_factory=utcnow)
 
+    def is_admin(self, tg_id: int | None) -> bool:
+        return tg_id is not None and tg_id in self.settings.tg_admin_ids
+
     async def run_sync(
-        self, *, full: bool = False, include_global: bool = False, include_accounts: bool = True
+        self,
+        *,
+        full: bool = False,
+        include_global: bool = False,
+        include_accounts: bool = True,
+        accounts: list[str] | None = None,
     ) -> SyncResult:
-        """Sync + deliver digests; serialized; system-topic alerts on errors/recovery."""
+        """Sync + deliver digests; serialized; system alerts on errors/recovery."""
         async with self.sync_lock:
             res = await self.engine.run(
-                full=full, include_global=include_global, include_accounts=include_accounts
+                full=full,
+                include_global=include_global,
+                include_accounts=include_accounts,
+                accounts=accounts,
             )
             self.last_result = res
             try:

@@ -2,21 +2,34 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from html import escape
 from zoneinfo import ZoneInfo
 
+from wklabs.lib.accounts import Account
 from wklabs.lib.status import account_status, stage_buckets, sync_status
 from wklabs.lib.timeutil import utcnow
 
 from .context import AppContext
 
 
-def _fmt_dt(dt, tz: ZoneInfo) -> str:
+def _fmt_dt(dt: datetime | None, tz: ZoneInfo) -> str:
     return dt.astimezone(tz).strftime("%d.%m %H:%M") if dt else "—"
 
 
-async def status_text(ctx: AppContext) -> str:
+async def _account_block(ctx: AppContext, acc: Account, tz: ZoneInfo) -> list[str]:
+    a = await account_status(ctx.db, acc.key)
+    b = stage_buckets(a["stages"])
+    return [
+        f"{acc.emoji} <b>{escape(acc.label)}</b> · {escape(str(a['username']))} · "
+        f"level {a['level']}" + (f" · <i>{escape(acc.status)}</i>" if not acc.is_active else ""),
+        f"  reviews now <b>{a['reviews_now']}</b> · lessons {a['lessons_now']} · "
+        f"next {_fmt_dt(a['next_reviews_at'], tz)} · 24h reviews {a['reviews_24h']}",
+        "  " + " · ".join(f"{k[:3]} {v}" for k, v in b.items()),
+    ]
+
+
+async def status_text(ctx: AppContext, accounts: list[Account], *, admin: bool) -> str:
     tz = ZoneInfo(ctx.settings.tz)
     s = await sync_status(ctx.db)
     last = s["last_run"]
@@ -29,25 +42,22 @@ async def status_text(ctx: AppContext) -> str:
             f"{'✅' if last['ok'] else '❌'} · events {last.get('events', 0)} · "
             f"req {last.get('requests', 0)}"
         )
-        if last.get("errors"):
+        if admin and last.get("errors"):
             lines.append("❌ " + escape("; ".join(last["errors"][:3])))
     else:
         lines.append("no sync runs yet")
-    c = s["counts"]
-    lines.append(
-        f"db: subjects {c['subjects']} · assignments {c['assignments']} · "
-        f"history {c['history']} · events {c['events']} (pending {c['pending_events']})"
-    )
-    for acc in ctx.settings.accounts:
-        a = await account_status(ctx.db, acc)
-        b = stage_buckets(a["stages"])
-        lines.append("")
-        lines.append(f"<b>{escape(acc)}</b> · {escape(str(a['username']))} · level {a['level']}")
+    if admin:
+        c = s["counts"]
         lines.append(
-            f"  reviews now <b>{a['reviews_now']}</b> · lessons {a['lessons_now']} · "
-            f"next {_fmt_dt(a['next_reviews_at'], tz)} · 24h reviews {a['reviews_24h']}"
+            f"db: subjects {c['subjects']} · assignments {c['assignments']} · "
+            f"history {c['history']} · events {c['events']} (pending {c['pending_events']})"
         )
-        lines.append("  " + " · ".join(f"{k[:3]} {v}" for k, v in b.items()))
+    if not accounts:
+        lines.append("")
+        lines.append("no accounts yet — /accounts to add one")
+    for acc in accounts:
+        lines.append("")
+        lines.extend(await _account_block(ctx, acc, tz))
     up = utcnow() - ctx.started_at
     lines.append("")
     lines.append(
@@ -61,7 +71,7 @@ async def status_text(ctx: AppContext) -> str:
 async def alive_text(
     ctx: AppContext, user_id: int | None, chat_id: int | None = None, thread_id: int | None = None
 ) -> str:
-    """/start, /ping — for anyone: proves the bot is alive; shows the ids needed for the env."""
+    """/ping — proves the bot is alive; shows the ids useful for the env and debugging."""
     tz = ZoneInfo(ctx.settings.tz)
     last = await ctx.db.sync_runs.find_one({}, sort=[("started_at", -1)])
     if last:
@@ -71,28 +81,18 @@ async def alive_text(
     else:
         sync = "no sync runs yet"
     up = timedelta(seconds=int((utcnow() - ctx.started_at).total_seconds()))
-    is_admin = user_id is not None and user_id in ctx.settings.tg_admin_ids
     lines = [
         f"👋 <b>wanikani-labs</b> alive · uptime {up!s} · poll every {ctx.settings.sync_interval}s",
         sync,
-        f"your id: <code>{user_id}</code> · "
-        + (
-            "admin — /status /sync /help"
-            if is_admin
-            else "not in TG_ADMIN_IDS (admin commands ignored)"
-        ),
+        f"your id: <code>{user_id}</code>"
+        + (" · admin" if ctx.is_admin(user_id) else "")
+        + (" · <i>dry-run, no Telegram delivery</i>" if ctx.notifier.dry_run else ""),
     ]
     if chat_id is not None and chat_id != user_id:
         here = f"chat id: <code>{chat_id}</code>"
         if thread_id is not None:
             here += f" · thread {thread_id}"
-        if not ctx.settings.forum_enabled:
-            here += " → put it into TG_FORUM_CHAT_ID"
-        elif chat_id != ctx.settings.tg_forum_chat_id:
-            here += " (not the configured forum)"
         lines.append(here)
-    elif not ctx.settings.forum_enabled:
-        lines.append("TG_FORUM_CHAT_ID not set → send /start inside the forum to get its chat id")
     return "\n".join(lines)
 
 
@@ -102,10 +102,10 @@ async def heartbeat_text(ctx: AppContext) -> str:
     failed = await ctx.db.sync_runs.count_documents({"started_at": {"$gte": since}, "ok": False})
     events = await ctx.db.events.count_documents({"at": {"$gte": since}})
     parts = [f"💓 24h: {runs} polls ({failed} failed) · {events} events"]
-    for acc in ctx.settings.accounts:
-        a = await account_status(ctx.db, acc)
+    for acc in await ctx.accounts.list(status=None):
+        a = await account_status(ctx.db, acc.key)
         parts.append(
-            f"{escape(acc)}: L{a['level']} · {a['reviews_24h']} reviews · "
+            f"{acc.emoji} {escape(acc.label)}: L{a['level']} · {a['reviews_24h']} reviews · "
             f"{a['reviews_now']} due now"
         )
     return "\n".join(parts)

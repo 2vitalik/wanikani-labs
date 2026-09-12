@@ -3,8 +3,8 @@ from zoneinfo import ZoneInfo
 
 from bson import ObjectId
 
-from wklabs.bot.digest import render_topic
-from wklabs.bot.routing import topic_defs, topic_for
+from wklabs.bot.digest import render
+from wklabs.bot.routing import category_for, target_for
 
 TZ = ZoneInfo("Europe/Kyiv")
 AT = datetime(2026, 8, 23, 12, 5, tzinfo=UTC)
@@ -46,19 +46,11 @@ def ev(kind, sid, **meta):
 
 
 def test_routing():
-    assert topic_for(ev("reviewed", 1)) == "main.reviews"
-    assert topic_for(ev("burned", 1)) == "main.milestones"
-    assert topic_for(ev("subject_updated", 1)) == "subjects"
-    assert topic_for(ev("hidden", 1)) is None
-    keys = [t.key for t in topic_defs(["main", "light"])]
-    assert keys == [
-        "main.reviews",
-        "main.milestones",
-        "light.reviews",
-        "light.milestones",
-        "subjects",
-        "system",
-    ]
+    assert target_for(ev("reviewed", 1)) == ("main", "reviews")
+    assert target_for(ev("burned", 1)) == ("main", "milestones")
+    assert target_for(ev("subject_updated", 1)) == (None, "subjects")
+    assert target_for(ev("hidden", 1)) is None
+    assert category_for("nope") is None and category_for("level_passed") == "milestones"
 
 
 def test_reviews_digest():
@@ -69,7 +61,7 @@ def test_reviews_digest():
         ev("srs_down", 2, from_stage=6, to_stage=4),
         ev("unlocked", 3),
     ]
-    msgs = render_topic("main.reviews", events, SUBJECTS, TZ)
+    msgs = render("reviews", "main", events, SUBJECTS, TZ)
     assert len(msgs) == 1
     text = msgs[0]
     assert "<b>main</b> · 15:05" in text  # Kyiv = UTC+3 in summer
@@ -89,8 +81,9 @@ def test_reviews_digest():
 
 
 def test_milestones_and_subjects():
-    msgs = render_topic(
-        "main.milestones",
+    msgs = render(
+        "milestones",
+        "main",
         [ev("burned", 1), ev("passed", 2), ev("user_level", None, from_level=39, to_level=40)],
         SUBJECTS,
         TZ,
@@ -99,7 +92,7 @@ def test_milestones_and_subjects():
     assert "🎉 <b>Level 40!</b>" in t and "🔥 burned (1): " in t and "💜 passed (Guru) (1)" in t
     e = ev("subject_updated", 1, changed=["meaning_mnemonic", "context_sentences"])
     e["account"] = None
-    t2 = render_topic("subjects", [e], SUBJECTS, TZ)[0]
+    t2 = render("subjects", None, [e], SUBJECTS, TZ)[0]
     assert "✏️" in t2 and "meaning_mnemonic, context_sentences" in t2 and "updated 1" in t2
 
 
@@ -111,7 +104,7 @@ def test_long_digest_splits_and_truncates():
     ]
     for e in events:
         e["subject_type"] = "vocabulary"
-    msgs = render_topic("main.reviews", events, many, TZ)
+    msgs = render("reviews", "main", events, many, TZ)
     assert all(len(m) <= 4096 for m in msgs)
     assert "… +139 more" in msgs[-1]  # MAX_LINES = 60
     assert all(m.startswith("📝 <b>main</b>") for m in msgs)

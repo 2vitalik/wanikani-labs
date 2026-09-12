@@ -1,34 +1,18 @@
-"""Forum topics and event-kind -> topic routing (change here, not in the schema)."""
+"""Event kind -> delivery category (change here, not in the schema).
+
+Categories are delivery channels (`lib.delivery`): account-scoped `reviews` /
+`milestones`, global `subjects` / `system`. `None` = state only, not notified.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
+
+from wklabs.lib.delivery import GLOBAL_CATEGORIES
 
 Json = dict[str, Any]
 
-# Telegram forum icon colours (the only values the API accepts)
-BLUE, YELLOW, PURPLE, GREEN, PINK, RED = 7322096, 16766590, 13338331, 9367192, 16749490, 16478047
-
-
-@dataclass(frozen=True, slots=True)
-class TopicDef:
-    key: str  # stable id stored in Mongo: "main.reviews", "subjects", "system"
-    title: str
-    icon_color: int
-
-
-def topic_defs(accounts: list[str]) -> list[TopicDef]:
-    out: list[TopicDef] = []
-    for acc in accounts:
-        out.append(TopicDef(f"{acc}.reviews", f"📝 {acc} · reviews", BLUE))
-        out.append(TopicDef(f"{acc}.milestones", f"🏆 {acc} · milestones", YELLOW))
-    out.append(TopicDef("subjects", "📚 subjects", PURPLE))
-    out.append(TopicDef("system", "🛠 system", RED))
-    return out
-
-
-_KIND_GROUP: dict[str, str | None] = {
+_KIND_CATEGORY: dict[str, str | None] = {
     "reviewed": "reviews",
     "srs_up": "reviews",
     "srs_down": "reviews",
@@ -55,10 +39,15 @@ _KIND_GROUP: dict[str, str | None] = {
 }
 
 
-def topic_for(event: Json) -> str | None:
-    group = _KIND_GROUP.get(str(event.get("kind")))
-    if group is None:
+def category_for(kind: str) -> str | None:
+    return _KIND_CATEGORY.get(kind)
+
+
+def target_for(event: Json) -> tuple[str | None, str] | None:
+    """`(account, category)` a stored event is delivered as; None = silent."""
+    category = category_for(str(event.get("kind")))
+    if category is None:
         return None
-    if group == "subjects":
-        return "subjects"
-    return f"{event.get('account')}.{group}"
+    if category in GLOBAL_CATEGORIES:
+        return (None, category)
+    return (event.get("account"), category)

@@ -1,7 +1,8 @@
 """Mongo access (PyMongo native async). One `Db` per process, passed explicitly.
 
-Collections (see T01): current-state per WaniKani resource + `history`
-(append-only versions) + `events` (derived) + sync/telegram bookkeeping.
+Collections (T01, T14/T21): current-state per WaniKani resource + `history`
+(append-only versions) + `events` (derived) + sync bookkeeping + `accounts`
+(WaniKani accounts, encrypted tokens) + `tg_*` (Telegram delivery layer).
 """
 
 from __future__ import annotations
@@ -39,7 +40,6 @@ ACCOUNTS = "accounts"
 TG_USERS = "tg_users"
 TG_CHATS = "tg_chats"
 TG_ROUTES = "tg_routes"
-TG_TOPICS = "tg_topics"
 TG_MESSAGES = "tg_messages"
 TG_FSM = "tg_fsm"  # aiogram PyMongoStorage (dialog state)
 
@@ -153,10 +153,6 @@ class Db:
     @property
     def tg_routes(self) -> AsyncCollection[Doc]:
         return self.database[TG_ROUTES]
-
-    @property
-    def tg_topics(self) -> AsyncCollection[Doc]:
-        return self.database[TG_TOPICS]
 
     @property
     def tg_messages(self) -> AsyncCollection[Doc]:

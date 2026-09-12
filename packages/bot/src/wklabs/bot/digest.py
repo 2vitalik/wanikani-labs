@@ -1,4 +1,4 @@
-"""Render a batch of events for one topic into Telegram HTML messages (pure)."""
+"""Render a batch of events of one (account, category) into Telegram HTML messages (pure)."""
 
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ def _chunk(header: str, lines: list[str], footer: str = "") -> list[str]:
 
 # ---------------------------------------------------------------- reviews
 def render_reviews(
-    account: str, events: list[Json], subjects: dict[int, Json], tz: ZoneInfo
+    label: str, events: list[Json], subjects: dict[int, Json], tz: ZoneInfo
 ) -> list[str]:
     by_subject: dict[int, dict[str, Json]] = defaultdict(dict)
     unlocked: list[Json] = []
@@ -104,7 +104,7 @@ def render_reviews(
     n_up = sum(1 for g in by_subject.values() if "srs_up" in g)
     n_down = sum(1 for g in by_subject.values() if "srs_down" in g)
     at = max(ev["at"] for ev in events)
-    parts = [f"📝 <b>{escape(account)}</b> · {_when(at, tz)}"]
+    parts = [f"📝 <b>{escape(label)}</b> · {_when(at, tz)}"]
     if n_reviews:
         parts.append(f"{n_reviews} reviews: ✅ {n_ok} · ❌ {n_bad} · ⬆️ {n_up} · ⬇️ {n_down}")
     if started:
@@ -153,10 +153,10 @@ def render_reviews(
 
 # ------------------------------------------------------------- milestones
 def render_milestones(
-    account: str, events: list[Json], subjects: dict[int, Json], tz: ZoneInfo
+    label: str, events: list[Json], subjects: dict[int, Json], tz: ZoneInfo
 ) -> list[str]:
     at = max(ev["at"] for ev in events)
-    header = f"🏆 <b>{escape(account)}</b> · {_when(at, tz)}"
+    header = f"🏆 <b>{escape(label)}</b> · {_when(at, tz)}"
     lines: list[str] = []
     groups: dict[str, list[Json]] = defaultdict(list)
     for ev in events:
@@ -209,14 +209,17 @@ def render_subjects(events: list[Json], subjects: dict[int, Json], tz: ZoneInfo)
     return _chunk(header, lines)
 
 
-def render_topic(
-    topic_key: str, events: list[Json], subjects: dict[int, Json], tz: ZoneInfo
+def render(
+    category: str,
+    label: str | None,
+    events: list[Json],
+    subjects: dict[int, Json],
+    tz: ZoneInfo,
 ) -> list[str]:
-    if topic_key == "subjects":
+    if category == "subjects":
         return render_subjects(events, subjects, tz)
-    account, _, group = topic_key.partition(".")
-    if group == "reviews":
-        return render_reviews(account, events, subjects, tz)
-    if group == "milestones":
-        return render_milestones(account, events, subjects, tz)
+    if category == "reviews":
+        return render_reviews(label or "?", events, subjects, tz)
+    if category == "milestones":
+        return render_milestones(label or "?", events, subjects, tz)
     return []

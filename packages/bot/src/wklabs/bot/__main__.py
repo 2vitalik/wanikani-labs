@@ -1,9 +1,9 @@
 """Entry point: `python -m wklabs.bot` / `wklabs-bot`.
 
-Start order (journald-greppable): ping Mongo → indexes → bot → topics →
-scheduler (first global+account sync within seconds) → polling.
-Without BOT_TOKEN: dry-run (polls, logs digests). With a token but no
-TG_FORUM_CHAT_ID: bootstrap — answers /start (chat/thread/user ids), logs digests.
+Start order (journald-greppable): ping Mongo → indexes → bot → scheduler
+(first global+account sync within seconds) → polling. Accounts live in Mongo
+(`/accounts` in the bot, `wklabs accounts …`); the bot runs fine with none.
+Without BOT_TOKEN: dry-run (polls, logs digests, no Telegram).
 """
 
 from __future__ import annotations
@@ -15,57 +15,96 @@ import signal
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand
+from aiogram.fsm.storage.pymongo import PyMongoStorage
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeAllGroupChats,
+    BotCommandScopeAllPrivateChats,
+    BotCommandScopeChat,
+)
 
-from wklabs.lib.db import Db
+from wklabs.lib.accounts import AccountRepo
+from wklabs.lib.crypto import CipherError, TokenCipher
+from wklabs.lib.db import TG_FSM, Db
+from wklabs.lib.delivery import ChatRepo, RouteRepo
 from wklabs.lib.logging_setup import setup_logging
 from wklabs.lib.settings import get_settings
 from wklabs.lib.sync import SyncEngine
+from wklabs.lib.users import TgUserRepo
 
 from .context import AppContext
-from .handlers import public, router
+from .handlers import ROUTERS
+from .middleware import UserMiddleware
 from .notifier import Notifier
 from .scheduler import build_scheduler
 from .topics import TopicManager
 
 log = logging.getLogger("wklabs.bot")
 
+PRIVATE_COMMANDS = [
+    BotCommand(command="accounts", description="your WaniKani accounts"),
+    BotCommand(command="status", description="levels, reviews due, last sync"),
+    BotCommand(command="help", description="how it works"),
+]
+GROUP_COMMANDS = [
+    BotCommand(command="setup", description="deliver digests to this chat"),
+    BotCommand(command="status", description="levels, reviews due, last sync"),
+    BotCommand(command="ping", description="am I alive?"),
+]
+ADMIN_COMMANDS = [
+    *PRIVATE_COMMANDS,
+    BotCommand(command="admin", description="users, accounts, sync"),
+    BotCommand(command="sync", description="poll now"),
+    BotCommand(command="sync_full", description="full refetch"),
+]
+
 
 async def run() -> None:
     settings = get_settings()
     setup_logging(settings.log_level)
-    if not settings.accounts:
-        raise SystemExit("no WaniKani accounts configured (WK_TOKEN__<NAME>)")
+    try:
+        cipher = TokenCipher.from_settings(settings)
+    except CipherError as exc:
+        raise SystemExit(str(exc)) from exc
 
     db = Db.from_settings(settings)
     await db.ping()
     await db.ensure_indexes()
-    log.info("MongoDB connected: db=%s · accounts=%s", settings.mongo_db, settings.accounts)
+    accounts = AccountRepo(db, cipher)
+    users = TgUserRepo(db, admin_ids=settings.tg_admin_ids, policy=settings.access_policy)
+    chats, routes = ChatRepo(db), RouteRepo(db)
+    active = await accounts.list()
+    log.info(
+        "MongoDB connected: db=%s · active accounts=%s · policy=%s · admins=%s",
+        settings.mongo_db,
+        [a.key for a in active],
+        settings.access_policy,
+        settings.tg_admin_ids,
+    )
 
     bot: Bot | None = None
     if settings.tg_enabled:
         bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-        if not settings.forum_enabled:
-            log.warning(
-                "TG_FORUM_CHAT_ID not set → bootstrap mode: /start answers (shows chat id), "
-                "digests go to the log"
-            )
     else:
         log.warning("BOT_TOKEN not set → dry-run (no Telegram at all, digests go to the log)")
 
-    engine = SyncEngine(db, settings.wk_token)
-    topics = TopicManager(db, settings.tg_forum_chat_id, settings.accounts)
-    notifier = Notifier(db, bot, topics, settings.tz, settings.tg_forum_chat_id)
-    ctx = AppContext(
-        settings=settings, db=db, engine=engine, topics=topics, notifier=notifier, bot=bot
+    engine = SyncEngine(db, accounts)
+    topics = TopicManager(bot, chats, routes, accounts)
+    notifier = Notifier(
+        db, bot, routes=routes, accounts=accounts, users=users, topics=topics, tz=settings.tz
     )
-
-    if bot is not None:
-        try:
-            created = await topics.ensure(bot)
-            log.info("forum topics ready (%d created): %s", len(created), sorted(topics.threads))
-        except Exception:
-            log.exception("could not ensure forum topics (is the bot admin with Manage Topics?)")
+    ctx = AppContext(
+        settings=settings,
+        db=db,
+        engine=engine,
+        accounts=accounts,
+        users=users,
+        chats=chats,
+        routes=routes,
+        topics=topics,
+        notifier=notifier,
+        bot=bot,
+    )
 
     sched = build_scheduler(ctx)
     sched.start()
@@ -84,21 +123,26 @@ async def run() -> None:
             log.info("dry-run loop running; Ctrl+C to stop")
             await stop.wait()
         else:
-            dp = Dispatcher()
-            dp.include_router(public)
-            dp.include_router(router)
-            dp["ctx"] = ctx
-            await bot.set_my_commands(
-                [
-                    BotCommand(command="start", description="am I alive? shows your id"),
-                    BotCommand(command="status", description="last sync, levels, reviews due"),
-                    BotCommand(command="sync", description="poll now"),
-                    BotCommand(command="sync_full", description="full refetch"),
-                    BotCommand(command="topics", description="ensure forum topics"),
-                    BotCommand(command="help", description="help"),
-                ]
+            storage = PyMongoStorage(
+                client=db.client, db_name=settings.mongo_db, collection_name=TG_FSM
             )
+            dp = Dispatcher(storage=storage)
+            dp.message.outer_middleware(UserMiddleware(ctx))
+            dp.callback_query.outer_middleware(UserMiddleware(ctx))
+            for r in ROUTERS:
+                dp.include_router(r)
+            dp["ctx"] = ctx
             me = await bot.get_me()
+            ctx.bot_username = me.username or ""
+            await bot.set_my_commands(PRIVATE_COMMANDS, scope=BotCommandScopeAllPrivateChats())
+            await bot.set_my_commands(GROUP_COMMANDS, scope=BotCommandScopeAllGroupChats())
+            for admin_id in settings.tg_admin_ids:
+                try:
+                    await bot.set_my_commands(
+                        ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=admin_id)
+                    )
+                except Exception as exc:  # admin never opened the bot yet
+                    log.info("admin commands for %s not set: %s", admin_id, exc)
             log.info("polling as @%s (id=%s)", me.username, me.id)
             await dp.start_polling(bot, handle_signals=True)
     finally:

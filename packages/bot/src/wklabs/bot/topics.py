@@ -1,4 +1,4 @@
-"""Forum topics: create once (bot must be admin with can_manage_topics), remember in Mongo."""
+"""Forum topics for routes: created lazily on first delivery, renamed with the account label."""
 
 from __future__ import annotations
 
@@ -6,52 +6,75 @@ import logging
 
 from aiogram import Bot
 
-from wklabs.lib.db import Db
-from wklabs.lib.timeutil import utcnow
-
-from .routing import TopicDef, topic_defs
+from wklabs.lib.accounts import AccountRepo
+from wklabs.lib.delivery import (
+    BLUE,
+    CATEGORY_COLOR,
+    LAYOUT_TOPICS,
+    ChatRepo,
+    Route,
+    RouteRepo,
+    topic_title,
+)
 
 log = logging.getLogger(__name__)
 
 
 class TopicManager:
-    def __init__(self, db: Db, chat_id: int | None, accounts: list[str]) -> None:
-        self.db = db
-        self.chat_id = chat_id
-        self.defs: dict[str, TopicDef] = {t.key: t for t in topic_defs(accounts)}
-        self.threads: dict[str, int] = {}  # key -> message_thread_id
+    def __init__(
+        self, bot: Bot | None, chats: ChatRepo, routes: RouteRepo, accounts: AccountRepo
+    ) -> None:
+        self.bot = bot
+        self.chats = chats
+        self.routes = routes
+        self.accounts = accounts
 
-    async def load(self) -> None:
-        async for d in self.db.tg_topics.find({"chat_id": self.chat_id}):
-            self.threads[str(d["_id"])] = int(d["thread_id"])
+    async def ensure_thread(self, route: Route) -> int | None:
+        """Thread id for a route: None in private/single chats; forum topic created on demand."""
+        if route.thread_id is not None:
+            return route.thread_id
+        chat = await self.chats.get(route.chat_id)
+        if self.bot is None or chat is None or chat.layout != LAYOUT_TOPICS:
+            return None
+        label = None
+        if route.account is not None:
+            acc = await self.accounts.get(route.account)
+            label = acc.label if acc else route.account
+        title = topic_title(route.category, label)
+        topic = await self.bot.create_forum_topic(
+            chat.id, name=title, icon_color=CATEGORY_COLOR.get(route.category, BLUE)
+        )
+        await self.routes.set_thread(route.id, topic.message_thread_id, title)
+        log.info(
+            "created forum topic %r in %s -> thread %s", title, chat.id, topic.message_thread_id
+        )
+        return topic.message_thread_id
 
-    async def ensure(self, bot: Bot | None) -> list[str]:
-        """Create missing topics; returns keys created. No-op without a bot (dry-run)."""
-        await self.load()
+    async def ensure_chat_topics(self, chat_id: int) -> list[str]:
+        """Create every missing topic for the enabled routes of a chat (after /setup)."""
         created: list[str] = []
-        if bot is None or self.chat_id is None:
-            return created
-        for key, tdef in self.defs.items():
-            if key in self.threads:
-                continue
-            topic = await bot.create_forum_topic(
-                self.chat_id, name=tdef.title, icon_color=tdef.icon_color
-            )
-            self.threads[key] = topic.message_thread_id
-            await self.db.tg_topics.replace_one(
-                {"_id": key},
-                {
-                    "_id": key,
-                    "chat_id": self.chat_id,
-                    "thread_id": topic.message_thread_id,
-                    "title": tdef.title,
-                    "created_at": utcnow(),
-                },
-                upsert=True,
-            )
-            created.append(key)
-            log.info("created forum topic %s -> thread %s", key, topic.message_thread_id)
+        for route in await self.routes.for_chat(chat_id):
+            if route.thread_id is None and await self.ensure_thread(route) is not None:
+                fresh = await self.routes.get(route.id)
+                created.append(fresh.thread_title or route.category if fresh else route.category)
         return created
 
-    def thread_id(self, key: str) -> int | None:
-        return self.threads.get(key)
+    async def rename_account(self, account: str, label: str) -> int:
+        """Account label changed → rename its topics (best effort)."""
+        if self.bot is None:
+            return 0
+        n = 0
+        for route in await self.routes.for_account(account, include_disabled=True):
+            if route.thread_id is None:
+                continue
+            title = topic_title(route.category, label)
+            if title == route.thread_title:
+                continue
+            try:
+                await self.bot.edit_forum_topic(route.chat_id, route.thread_id, name=title)
+            except Exception:
+                log.warning("could not rename topic %s/%s", route.chat_id, route.thread_id)
+                continue
+            await self.routes.set_thread(route.id, route.thread_id, title)
+            n += 1
+        return n

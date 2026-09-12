@@ -1,48 +1,30 @@
-"""/start text: works for anyone, tells the caller their id and admin status."""
+"""/ping and /status texts over the repo-based context."""
 
 from datetime import timedelta
 
-from wklabs.bot.context import AppContext
-from wklabs.bot.notifier import Notifier
-from wklabs.bot.status_text import alive_text
-from wklabs.bot.topics import TopicManager
-from wklabs.lib.settings import Settings
-from wklabs.lib.sync import SyncEngine
+from wklabs.bot.status_text import alive_text, status_text
 from wklabs.lib.timeutil import utcnow
 
-
-def _ctx(db, admin_ids):
-    settings = Settings(tg_admin_ids=admin_ids)
-    topics = TopicManager(db, None, ["main"])
-    return AppContext(
-        settings=settings,
-        db=db,
-        engine=SyncEngine(db, {}),
-        topics=topics,
-        notifier=Notifier(db, None, topics, settings.tz, None),
-    )
+from .helpers import ident, make_ctx
 
 
-async def test_alive_text_non_admin_and_admin(db):
-    ctx = _ctx(db, [])
-    text = await alive_text(ctx, 42)
-    assert "alive" in text and "no sync runs yet" in text
-    assert "<code>42</code>" in text and "not in TG_ADMIN_IDS" in text
-
+async def test_alive_text(db):
+    ctx = make_ctx(db, admin_ids=[42])
+    text = await alive_text(ctx, 7)
+    assert "alive" in text and "no sync runs yet" in text and "<code>7</code>" in text
+    assert "admin" not in text and "dry-run" in text
     await db.sync_runs.insert_one(
         {"started_at": utcnow() - timedelta(minutes=7), "kind": "incremental", "ok": True}
     )
-    text = await alive_text(_ctx(db, [42]), 42)
-    assert "(7 min ago) ✅" in text and "admin — /status" in text
-    assert "not in TG_ADMIN_IDS" not in text
+    text = await alive_text(ctx, 42, -1001234, 9)
+    assert "(7 min ago) ✅" in text and "<code>42</code> · admin" in text
+    assert "chat id: <code>-1001234</code> · thread 9" in text
 
 
-async def test_alive_text_shows_chat_id_for_bootstrap(db):
-    ctx = _ctx(db, [42])
-    private = await alive_text(ctx, 42, 42, None)
-    assert "TG_FORUM_CHAT_ID not set" in private and "chat id: <code>" not in private
-    forum = await alive_text(ctx, 42, -1001234, 7)
-    assert "chat id: <code>-1001234</code> · thread 7 → put it into TG_FORUM_CHAT_ID" in forum
-    ctx.settings = Settings(tg_admin_ids=[42], bot_token="x", tg_forum_chat_id=-1001234)
-    assert "→ put it" not in await alive_text(ctx, 42, -1001234, 7)
-    assert "(not the configured forum)" in await alive_text(ctx, 42, -1009999, None)
+async def test_status_text_lists_accounts(db):
+    ctx = make_ctx(db, admin_ids=[42])
+    text = await status_text(ctx, [], admin=False)
+    assert "no accounts yet" in text and "db:" not in text
+    acc = await ctx.accounts.create(ident(), "tok", owner_tg_id=42, source="test")
+    text = await status_text(ctx, [acc], admin=True)
+    assert "🟢 <b>Vitalik</b>" in text and "db: subjects" in text
