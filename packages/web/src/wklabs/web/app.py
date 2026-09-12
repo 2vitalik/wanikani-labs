@@ -10,8 +10,8 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from wklabs.lib.accounts import AccountRepo
 from wklabs.lib.db import Db
-from wklabs.lib.settings import get_settings
 from wklabs.lib.status import account_status, sync_status
 
 VUE_DIST = Path(__file__).resolve().parents[4] / "vue" / "dist"
@@ -32,7 +32,7 @@ async def health(request: Request) -> dict[str, Any]:
 async def status(request: Request) -> dict[str, Any]:
     db = _db(request)
     s = await sync_status(db)
-    accounts = [await account_status(db, a) for a in get_settings().accounts]
+    accounts = [await account_status(db, a.key) for a in await AccountRepo(db).list()]
     last = s["last_run"]
     return {
         "last_run": {k: v for k, v in last.items() if k != "stats"} if last else None,
