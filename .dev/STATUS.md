@@ -8,7 +8,7 @@
 
 ## Агент
 
-`2026-09-12` · Claude
-🟩 Зробили — T29 фаза 1 чатів: lib/chats.py (реєстр, права, гілки, міграція), пресети замість layout, ChatMiddleware + my_chat_member + picker request_chat, /chats з карткою й пресетами, легкий /setup + Configure here, здоровʼя маршрутів (topic deleted → Recreate, kicked → off); 53 тести, ruff/pyright чисті
-🟨 Далі — фаза 2 чатів (ціль на маршруті, гілки з UI, silent/items, subscribers, can_edit; M) або крок 2 T07
-🟥 Чекає тебе — коміт T29; живий прогін: ➕ Add a chat у тестовий форум → пресет → дайджест; /setup → Configure here; видалити гілку руками → DM Recreate
+`2026-09-13` · Claude
+🟩 Зробили — T30 фаза 2 чатів: реєстр налаштувань (silent/items), ціль на маршруті (чат → гілка, auto/General/відома/нова), also-deliver, гілки з UI, підписки subjects/system, Routes here, can_edit; 60 тестів, ruff/pyright чисті
+🟨 Далі — після твого живого прогону: правки за знахідками; потім крок 2 T07 (сесії, денний підсумок, стрік; L)
+🟥 Чекає тебе — коміти T30; живий прогін обох фаз за 7 кроками з T30 report «Хвости»; потім vv3 runbook §9
