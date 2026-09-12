@@ -37,6 +37,8 @@ src = ["packages/*/src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+# bot button/text glyphs that ruff considers confusable with ASCII
+allowed-confusables = ["➕", "ℹ", "›", "–"]
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = [
