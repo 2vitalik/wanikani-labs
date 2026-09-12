@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -17,6 +17,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 # packages/lib/src/wklabs/lib/settings.py -> repo root
 REPO_ROOT = Path(__file__).resolve().parents[5]
 ENV_FILE = Path(os.environ.get("WKLABS_ENV_FILE", REPO_ROOT / ".env"))
+
+AccessPolicy = Literal["open", "approve", "closed"]
 
 
 class Settings(BaseSettings):
@@ -34,6 +36,10 @@ class Settings(BaseSettings):
     bot_token: str = ""  # empty = dry-run (digests to log)
     tg_forum_chat_id: int | None = None
     tg_admin_ids: Annotated[list[int], NoDecode] = []
+    access_policy: AccessPolicy = "open"  # open | approve | closed — see T21
+
+    # Fernet key for account tokens at rest (`wklabs gen-key`) — env WKLABS_SECRET_KEY
+    wklabs_secret_key: str = ""
 
     # Mongo
     mongo_uri: str = "mongodb://localhost:27017"
@@ -76,6 +82,10 @@ class Settings(BaseSettings):
     @property
     def accounts(self) -> list[str]:
         return sorted(self.wk_token)
+
+    @property
+    def secret_key(self) -> str:
+        return self.wklabs_secret_key
 
     @property
     def tg_enabled(self) -> bool:

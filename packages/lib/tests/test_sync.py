@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from wklabs.lib.rebuild import rebuild_events
-from wklabs.lib.sync import SyncEngine
+from wklabs.lib.sync import StaticTokens, SyncEngine
 
 
 class FakeWK:
@@ -236,3 +236,20 @@ async def test_error_in_one_resource_does_not_block_others(db, wk, engine):
     assert r.stats["main"]["assignments"].error is None
     st = await db.sync_state.find_one({"_id": "main:review_statistics"})
     assert st and st.get("last_ok_at") is None and st["last_error"]
+
+
+async def test_auth_error_stops_account_and_marks_source(db):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": "Unauthorized. Nice try.", "code": 401})
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    src = StaticTokens({"bad": "tok"})
+    eng = SyncEngine(db, src, http=http)
+    res = await eng.run(include_global=False)
+    assert src.auth_errors["bad"].startswith("HTTP 401: ")
+    assert list(res.stats["bad"]) == ["user"]  # stopped after the first 401
+    assert res.errors and res.errors[0].startswith("bad:user")
+    # no active accounts → quiet no-op, not an error
+    res2 = await SyncEngine(db, StaticTokens({}), http=http).run()
+    assert res2.ok and res2.stats == {}
+    await eng.aclose()

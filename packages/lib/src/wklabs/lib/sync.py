@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 from bson import ObjectId
@@ -29,6 +29,29 @@ log = logging.getLogger(__name__)
 Json = dict[str, Any]
 
 
+class TokenSource(Protocol):
+    """Where account tokens come from (`AccountRepo` in prod, `StaticTokens` in tests/CLI)."""
+
+    async def active_tokens(self, keys: list[str] | None = None) -> dict[str, str]: ...
+    async def on_auth_error(self, key: str, message: str) -> None: ...
+    async def on_user_seen(self, key: str, item: Json) -> None: ...
+
+
+class StaticTokens:
+    def __init__(self, tokens: dict[str, str]) -> None:
+        self.tokens = dict(tokens)
+        self.auth_errors: dict[str, str] = {}
+
+    async def active_tokens(self, keys: list[str] | None = None) -> dict[str, str]:
+        return {k: t for k, t in self.tokens.items() if not keys or k in keys}
+
+    async def on_auth_error(self, key: str, message: str) -> None:
+        self.auth_errors[key] = message
+
+    async def on_user_seen(self, key: str, item: Json) -> None:
+        pass
+
+
 @dataclass(slots=True)
 class ResourceStats:
     fetched: int = 0
@@ -38,6 +61,7 @@ class ResourceStats:
     events: int = 0
     baseline: bool = False
     error: str | None = None
+    error_status: int | None = None  # HTTP status when the error came from WaniKani
 
 
 @dataclass(slots=True)
@@ -118,16 +142,36 @@ def history_doc(
 
 class SyncEngine:
     def __init__(
-        self, db: Db, tokens: dict[str, str], *, http: httpx.AsyncClient | None = None
+        self,
+        db: Db,
+        source: TokenSource | dict[str, str],
+        *,
+        http: httpx.AsyncClient | None = None,
     ) -> None:
         self.db = db
-        self.clients: dict[str, WaniKaniClient] = {
-            acc: WaniKaniClient(tok, http=http) for acc, tok in tokens.items()
-        }
+        self.source: TokenSource = StaticTokens(source) if isinstance(source, dict) else source
+        self.http = http
+        self.clients: dict[
+            str, WaniKaniClient
+        ] = {}  # key -> client (rebuilt when the token changes)
+        self._tokens: dict[str, str] = {}
 
     async def aclose(self) -> None:
         for c in self.clients.values():
             await c.aclose()
+        self.clients.clear()
+
+    async def _refresh_clients(self, keys: list[str] | None) -> list[str]:
+        tokens = await self.source.active_tokens(keys)
+        for key in list(self.clients):
+            if self._tokens.get(key) != tokens.get(key):
+                await self.clients.pop(key).aclose()
+                self._tokens.pop(key, None)
+        for key, tok in tokens.items():
+            if key not in self.clients:
+                self.clients[key] = WaniKaniClient(tok, http=self.http)
+                self._tokens[key] = tok
+        return sorted(tokens)
 
     # ------------------------------------------------------------------ run
     async def run(
@@ -142,15 +186,15 @@ class SyncEngine:
         result = SyncResult(
             run_id=ObjectId(), kind="full" if full else "incremental", started_at=utcnow()
         )
-        accs = accounts or sorted(self.clients)
+        accs = await self._refresh_clients(accounts)
         if not accs:
-            result.errors.append("no accounts configured (WK_TOKEN__*)")
+            log.info("sync %s: no active accounts — nothing to do", result.kind)
             result.finished_at = utcnow()
             return result
         before = sum(c.requests_made for c in self.clients.values())
 
         if include_global:
-            client = self.clients[accs[0]]
+            client = self.clients[accs[0]]  # subjects are identical for every token (T10)
             per: dict[str, ResourceStats] = {}
             for name in GLOBAL_RESOURCES:
                 if resources and name not in resources:
@@ -168,6 +212,10 @@ class SyncEngine:
                     per[name] = await self._sync_resource(
                         acc, RESOURCES[name], client, full, result
                     )
+                    if per[name].error_status in (401, 403):
+                        # token revoked: stop polling this account until a new token arrives
+                        await self.source.on_auth_error(acc, per[name].error or "auth error")
+                        break
                 result.stats[acc] = per
 
         result.requests = sum(c.requests_made for c in self.clients.values()) - before
@@ -234,6 +282,7 @@ class SyncEngine:
                             max_updated = du
         except WaniKaniError as exc:
             stats.error = str(exc)
+            stats.error_status = exc.status
         except Exception as exc:
             log.exception("sync %s/%s failed", account, res.name)
             stats.error = f"{type(exc).__name__}: {exc}"
@@ -302,6 +351,8 @@ class SyncEngine:
         if not writes:
             return
         await coll.bulk_write(writes, ordered=False)
+        if res.name == "user" and account is not None:
+            await self.source.on_user_seen(account, items[0])
 
         # history: unique on version — duplicates mean "already recorded" (e.g. re-sync)
         inserted_ids: dict[int, ObjectId] = {}

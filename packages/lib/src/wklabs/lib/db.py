@@ -35,8 +35,13 @@ HISTORY = "history"
 EVENTS = "events"
 SYNC_STATE = "sync_state"
 SYNC_RUNS = "sync_runs"
+ACCOUNTS = "accounts"
+TG_USERS = "tg_users"
+TG_CHATS = "tg_chats"
+TG_ROUTES = "tg_routes"
 TG_TOPICS = "tg_topics"
 TG_MESSAGES = "tg_messages"
+TG_FSM = "tg_fsm"  # aiogram PyMongoStorage (dialog state)
 
 _INDEXES: dict[str, list[tuple[list[tuple[str, int]], dict[str, Any]]]] = {
     "subjects": [
@@ -77,6 +82,19 @@ _INDEXES: dict[str, list[tuple[list[tuple[str, int]], dict[str, Any]]]] = {
         ([("subject_id", ASCENDING), ("at", DESCENDING)], {}),
     ],
     SYNC_RUNS: [([("started_at", DESCENDING)], {})],
+    ACCOUNTS: [
+        ([("wk_id", ASCENDING)], {"unique": True}),
+        ([("owner_tg_id", ASCENDING), ("status", ASCENDING)], {}),
+    ],
+    TG_USERS: [([("status", ASCENDING)], {})],
+    TG_ROUTES: [
+        (
+            [("account", ASCENDING), ("category", ASCENDING), ("chat_id", ASCENDING)],
+            {"unique": True},
+        ),
+        ([("chat_id", ASCENDING), ("thread_id", ASCENDING)], {}),
+        ([("account", ASCENDING), ("enabled", ASCENDING)], {}),
+    ],
     TG_MESSAGES: [([("sent_at", DESCENDING)], {})],
 }
 
@@ -119,6 +137,22 @@ class Db:
     @property
     def sync_runs(self) -> AsyncCollection[Doc]:
         return self.database[SYNC_RUNS]
+
+    @property
+    def accounts(self) -> AsyncCollection[Doc]:
+        return self.database[ACCOUNTS]
+
+    @property
+    def tg_users(self) -> AsyncCollection[Doc]:
+        return self.database[TG_USERS]
+
+    @property
+    def tg_chats(self) -> AsyncCollection[Doc]:
+        return self.database[TG_CHATS]
+
+    @property
+    def tg_routes(self) -> AsyncCollection[Doc]:
+        return self.database[TG_ROUTES]
 
     @property
     def tg_topics(self) -> AsyncCollection[Doc]:
