@@ -87,6 +87,7 @@ _INDEXES: dict[str, list[tuple[list[tuple[str, int]], dict[str, Any]]]] = {
         ([("owner_tg_id", ASCENDING), ("status", ASCENDING)], {}),
     ],
     TG_USERS: [([("status", ASCENDING)], {})],
+    TG_CHATS: [([("member_ids", ASCENDING)], {}), ([("status", ASCENDING)], {})],
     TG_ROUTES: [
         (
             [("account", ASCENDING), ("category", ASCENDING), ("chat_id", ASCENDING)],
@@ -94,6 +95,7 @@ _INDEXES: dict[str, list[tuple[list[tuple[str, int]], dict[str, Any]]]] = {
         ),
         ([("chat_id", ASCENDING), ("thread_id", ASCENDING)], {}),
         ([("account", ASCENDING), ("enabled", ASCENDING)], {}),
+        ([("status", ASCENDING)], {}),
     ],
     TG_MESSAGES: [([("sent_at", DESCENDING)], {})],
 }

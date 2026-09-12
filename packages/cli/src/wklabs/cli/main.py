@@ -161,7 +161,8 @@ def accounts_add(
 ) -> None:
     """Add (or re-key) an account. The token is read from stdin / a hidden prompt, never argv."""
     from wklabs.lib.accounts import InvalidTokenError, looks_like_token, validate_token
-    from wklabs.lib.delivery import ChatRepo, RouteRepo
+    from wklabs.lib.chats import ChatRepo
+    from wklabs.lib.delivery import RouteRepo
 
     settings = get_settings()
     token = (

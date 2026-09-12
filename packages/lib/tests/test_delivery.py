@@ -1,6 +1,16 @@
-"""Telegram users (roles, access policy) and delivery routes (move, suspend, revive)."""
+"""Telegram users (roles, access policy) and delivery routes (move, suspend, revive, health)."""
 
-from wklabs.lib.delivery import ChatRepo, RouteRepo, topic_title
+from wklabs.lib.chats import ChatRepo
+from wklabs.lib.delivery import (
+    ERR_TOPIC_CLOSED,
+    PRESET_GENERAL,
+    PRESET_ONE_TOPIC,
+    PRESET_PER_ACCOUNT,
+    PRESET_PER_CATEGORY,
+    RouteRepo,
+    preset_topic_name,
+    topic_title,
+)
 from wklabs.lib.users import TgUserRepo
 
 
@@ -22,6 +32,14 @@ async def test_users_policy_and_roles(db):
     assert u.is_active
 
 
+def test_presets():
+    assert preset_topic_name(PRESET_PER_CATEGORY, "reviews", "Vitalik") == "📝 Vitalik · reviews"
+    assert preset_topic_name(PRESET_PER_ACCOUNT, "reviews", "Vitalik") == "Vitalik"
+    assert preset_topic_name(PRESET_ONE_TOPIC, "milestones", "Vitalik") == "WaniKani"
+    assert preset_topic_name(PRESET_GENERAL, "reviews", "Vitalik") is None
+    assert topic_title("subjects", None) == "📚 subjects"
+
+
 async def test_routes_move_suspend_resume(db):
     chats, routes = ChatRepo(db), RouteRepo(db)
     priv = await chats.ensure_private(42)
@@ -32,25 +50,14 @@ async def test_routes_move_suspend_resume(db):
     again = await routes.upsert("07fff792", "reviews", 42, created_by=42)
     assert again.id == r[0].id  # unique (account, category, chat)
 
-    forum = await chats.upsert(
-        -100,
-        type="supergroup",
-        title="WK",
-        is_forum=True,
-        layout="topics",
-        set_up_by=42,
-        bot_is_admin=True,
-        can_manage_topics=True,
-    )
-    assert forum.topics_possible and forum.name == "WK"
-    assert [c.id for c in await chats.for_user(42)] == [42, -100]
     moved = await routes.move_account("07fff792", -100, created_by=42)
     assert [x.chat_id for x in await routes.for_target("07fff792", "reviews")] == [-100]
     assert len(await routes.for_account("07fff792", include_disabled=True)) == 4
     assert await routes.chats_for_account("07fff792") == [-100]
-    await routes.set_thread(moved[0].id, 7, topic_title("reviews", "Vitalik"))
+    await routes.set_thread(moved[0].id, 7, topic_title("reviews", "Vitalik"), by=42)
     got = await routes.get(moved[0].id)
     assert got and got.thread_id == 7 and got.thread_title == "📝 Vitalik · reviews"
+    assert got.updated_by == 42 and got.icon == "📝" and not got.has_error
 
     assert await routes.suspend_account("07fff792") == 2
     assert await routes.for_target("07fff792", "reviews") == []
@@ -60,4 +67,26 @@ async def test_routes_move_suspend_resume(db):
 
     g = await routes.upsert(None, "subjects", -100, created_by=42)
     assert g.account is None and len(await routes.for_target(None, "subjects")) == 1
-    assert await routes.disable_chat(-100) == 3
+    assert await routes.disable_for_owner(-100, ["07fff792"]) == 2
+    assert len(await routes.for_chat(-100)) == 1  # subjects stays
+    assert await routes.disable_chat(-100) == 1
+
+
+async def test_route_health(db):
+    routes = RouteRepo(db)
+    r = (await routes.ensure_account_routes("07fff792", -100, created_by=42))[0]
+    await routes.set_thread(r.id, 7, "📝 Vitalik · reviews")
+    assert await routes.set_error(r.id, ERR_TOPIC_CLOSED) is True
+    assert await routes.set_error(r.id, ERR_TOPIC_CLOSED) is False  # same error → no news
+    got = await routes.get(r.id)
+    assert got and got.has_error and got.error == ERR_TOPIC_CLOSED and got.error_at
+    assert await routes.clear_thread(-100, 7) == 1
+    got = await routes.get(r.id)
+    assert got and got.thread_id is None and got.thread_title == "📝 Vitalik · reviews"
+    await routes.clear_error(r.id)
+    got = await routes.get(r.id)
+    assert got and not got.has_error and got.error is None
+    await routes.set_error(r.id, "x")
+    await routes.set_thread(r.id, 8, "new")  # new target starts healthy
+    got = await routes.get(r.id)
+    assert got and not got.has_error
