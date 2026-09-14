@@ -42,6 +42,8 @@ TG_CHATS = "tg_chats"
 TG_ROUTES = "tg_routes"
 TG_MESSAGES = "tg_messages"
 TG_FSM = "tg_fsm"  # aiogram PyMongoStorage (dialog state)
+SESSIONS = "sessions"  # study sessions derived from events (T32 §2)
+REPORTS = "reports"  # sent session/window reports per route (T32 §3)
 
 _INDEXES: dict[str, list[tuple[list[tuple[str, int]], dict[str, Any]]]] = {
     "subjects": [
@@ -98,6 +100,12 @@ _INDEXES: dict[str, list[tuple[list[tuple[str, int]], dict[str, Any]]]] = {
         ([("status", ASCENDING)], {}),
     ],
     TG_MESSAGES: [([("sent_at", DESCENDING)], {})],
+    SESSIONS: [
+        ([("account", ASCENDING), ("gap", ASCENDING), ("started_at", ASCENDING)], {"unique": True}),
+        ([("account", ASCENDING), ("gap", ASCENDING), ("status", ASCENDING)], {}),
+        ([("status", ASCENDING), ("reported_at", ASCENDING)], {}),
+    ],
+    REPORTS: [([("route_id", ASCENDING), ("key", ASCENDING)], {"unique": True})],
 }
 
 
@@ -159,6 +167,14 @@ class Db:
     @property
     def tg_messages(self) -> AsyncCollection[Doc]:
         return self.database[TG_MESSAGES]
+
+    @property
+    def sessions(self) -> AsyncCollection[Doc]:
+        return self.database[SESSIONS]
+
+    @property
+    def reports(self) -> AsyncCollection[Doc]:
+        return self.database[REPORTS]
 
     # -- lifecycle ---------------------------------------------------------
     async def ping(self) -> None:

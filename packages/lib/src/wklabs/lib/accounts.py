@@ -19,7 +19,7 @@ from pymongo import ReturnDocument
 
 from .api import WaniKaniClient, WaniKaniError
 from .crypto import CipherError, TokenCipher
-from .db import EVENTS, HISTORY, SYNC_STATE, TG_ROUTES, Db
+from .db import EVENTS, HISTORY, SESSIONS, SYNC_STATE, TG_ROUTES, Db
 from .resources import RESOURCES
 from .timeutil import utcnow
 
@@ -339,7 +339,7 @@ async def delete_account_data(db: Db, key: str) -> dict[str, int]:
             counts[name] = (await coll.delete_one({"_id": key})).deleted_count
         else:
             counts[name] = (await coll.delete_many({"account": key})).deleted_count
-    for name in (HISTORY, EVENTS, TG_ROUTES):
+    for name in (HISTORY, EVENTS, TG_ROUTES, SESSIONS):
         counts[name] = (await db.col(name).delete_many({"account": key})).deleted_count
     counts[SYNC_STATE] = (
         await db.sync_state.delete_many({"_id": {"$regex": f"^{re.escape(key)}:"}})
@@ -364,7 +364,7 @@ async def rename_key(db: Db, old: str, new: str) -> dict[str, int]:
         else:
             r = await coll.update_many({"account": old}, {"$set": {"account": new}})
             counts[name] = r.modified_count
-    for name in (HISTORY, EVENTS, TG_ROUTES):
+    for name in (HISTORY, EVENTS, TG_ROUTES, SESSIONS):
         r = await db.col(name).update_many({"account": old}, {"$set": {"account": new}})
         counts[name] = r.modified_count
     n = 0

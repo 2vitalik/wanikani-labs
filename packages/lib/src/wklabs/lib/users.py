@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -30,6 +30,7 @@ class TgUser:
     status: str
     created_at: datetime
     last_seen_at: datetime
+    prefs: Json = field(default_factory=dict)  # personal UI options (`/progress`), T34 scope=user
 
     @classmethod
     def from_doc(cls, d: Json) -> TgUser:
@@ -42,6 +43,7 @@ class TgUser:
             status=str(d.get("status") or PENDING),
             created_at=d.get("created_at") or utcnow(),
             last_seen_at=d.get("last_seen_at") or utcnow(),
+            prefs=dict(d.get("prefs") or {}),
         )
 
     @property
@@ -112,6 +114,10 @@ class TgUserRepo:
         return [
             TgUser.from_doc(d) async for d in self.db.tg_users.find(q, sort=[("created_at", 1)])
         ]
+
+    async def set_pref(self, id: int, path: str, value: Any) -> None:
+        """`prefs.<path>` = value (dotted path, e.g. `progress.07fff792.sort`)."""
+        await self.db.tg_users.update_one({"_id": id}, {"$set": {f"prefs.{path}": value}})
 
     async def admin_ids_all(self) -> list[int]:
         """Env admins plus anyone with role admin in Mongo (same thing today)."""
