@@ -91,10 +91,8 @@ _INDEXES: dict[str, list[tuple[list[tuple[str, int]], dict[str, Any]]]] = {
     TG_USERS: [([("status", ASCENDING)], {})],
     TG_CHATS: [([("member_ids", ASCENDING)], {}), ([("status", ASCENDING)], {})],
     TG_ROUTES: [
-        (
-            [("account", ASCENDING), ("category", ASCENDING), ("chat_id", ASCENDING)],
-            {"unique": True},
-        ),
+        ([("account", ASCENDING), ("kind", ASCENDING), ("chat_id", ASCENDING)], {}),
+        ([("kind", ASCENDING), ("enabled", ASCENDING)], {}),
         ([("chat_id", ASCENDING), ("thread_id", ASCENDING)], {}),
         ([("account", ASCENDING), ("enabled", ASCENDING)], {}),
         ([("status", ASCENDING)], {}),
@@ -107,6 +105,8 @@ _INDEXES: dict[str, list[tuple[list[tuple[str, int]], dict[str, Any]]]] = {
     ],
     REPORTS: [([("route_id", ASCENDING), ("key", ASCENDING)], {"unique": True})],
 }
+# indexes of earlier schemas that must go (name → collection); T37: routes are no longer unique
+_DROP_INDEXES: dict[str, tuple[str, ...]] = {TG_ROUTES: ("account_1_category_1_chat_id_1",)}
 
 
 class Db:
@@ -181,6 +181,11 @@ class Db:
         await self.database.command("ping")
 
     async def ensure_indexes(self) -> None:
+        for coll, names in _DROP_INDEXES.items():
+            existing = await self.database[coll].index_information()
+            for name in names:
+                if name in existing:
+                    await self.database[coll].drop_index(name)
         for coll, specs in _INDEXES.items():
             for keys, kwargs in specs:
                 await self.database[coll].create_index(keys, **kwargs)
