@@ -1,23 +1,24 @@
-"""Event kind -> delivery category (change here, not in the schema).
+"""Event kind -> notification kind for instant delivery (change here, not in the schema).
 
-Categories are delivery channels (`lib.delivery`): account-scoped `reviews` /
+Kinds are delivery channels (`lib.delivery.KINDS`): account-scoped `live` /
 `milestones`, global `subjects` / `system`. `None` = state only, not notified.
+Sessions consume every account event of their window on their own (T32 §5).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from wklabs.lib.delivery import GLOBAL_CATEGORIES
+from wklabs.lib.delivery import GLOBAL_KINDS
 
 Json = dict[str, Any]
 
-_KIND_CATEGORY: dict[str, str | None] = {
-    "reviewed": "reviews",
-    "srs_up": "reviews",
-    "srs_down": "reviews",
-    "unlocked": "reviews",
-    "started": "reviews",
+_EVENT_KIND: dict[str, str | None] = {
+    "reviewed": "live",
+    "srs_up": "live",
+    "srs_down": "live",
+    "unlocked": "live",
+    "started": "live",
     "passed": "milestones",
     "burned": "milestones",
     "resurrected": "milestones",
@@ -39,15 +40,15 @@ _KIND_CATEGORY: dict[str, str | None] = {
 }
 
 
-def category_for(kind: str) -> str | None:
-    return _KIND_CATEGORY.get(kind)
+def kind_for(event_kind: str) -> str | None:
+    return _EVENT_KIND.get(event_kind)
 
 
 def target_for(event: Json) -> tuple[str | None, str] | None:
-    """`(account, category)` a stored event is delivered as; None = silent."""
-    category = category_for(str(event.get("kind")))
-    if category is None:
+    """`(account, kind)` a stored event is delivered as; None = silent."""
+    kind = kind_for(str(event.get("kind")))
+    if kind is None:
         return None
-    if category in GLOBAL_CATEGORIES:
-        return (None, category)
-    return (event.get("account"), category)
+    if kind in GLOBAL_KINDS:
+        return (None, kind)
+    return (event.get("account"), kind)

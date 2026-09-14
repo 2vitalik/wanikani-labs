@@ -10,22 +10,35 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from bson import ObjectId
 
 from wklabs.lib.accounts import ACTIVE, PAUSED, Account
 from wklabs.lib.chats import Chat, Topic
 from wklabs.lib.delivery import (
-    CATEGORY_ICON,
+    ADDABLE_KINDS,
     ERR_TOPIC_DELETED,
+    KINDS,
     PRESET_GENERAL,
     PRESET_LABEL,
     PRESETS,
     Route,
 )
-from wklabs.lib.route_settings import Setting
+from wklabs.lib.notify_settings import Setting
+from wklabs.lib.progress import PROGRESS_OPTIONS, option_label
 from wklabs.lib.users import ACTIVE as U_ACTIVE
 from wklabs.lib.users import BLOCKED, PENDING, TgUser
 
-from .callbacks import AccCb, AdminCb, ChatCb, NavCb, RouteCb, TargetCb, TopicCb
+from .callbacks import (
+    AccCb,
+    AdminCb,
+    ChatCb,
+    NavCb,
+    ProgressCb,
+    RouteCb,
+    SessionCb,
+    TargetCb,
+    TopicCb,
+)
 
 PICK_CANCEL = "✖️ Cancel"
 # request_chat ids: which button was pressed (comes back in `chat_shared.request_id`)
@@ -87,7 +100,7 @@ def kb_back_chats() -> InlineKeyboardMarkup:
 
 def kb_account_card(acc: Account) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text="📬 Delivery", callback_data=AccCb(key=acc.key, action="delivery"))
+    b.button(text="📬 Notifications", callback_data=AccCb(key=acc.key, action="notif"))
     b.button(text="✏️ Rename", callback_data=AccCb(key=acc.key, action="rename"))
     b.button(text="🔑 Replace token", callback_data=AccCb(key=acc.key, action="token"))
     if acc.status == ACTIVE:
@@ -117,15 +130,15 @@ def route_button_text(route: Route, chat: Chat) -> str:
     return f"{_on(route.enabled)} {where}{marks}"
 
 
-def kb_delivery(
-    acc: Account, categories: list[str], subjects: list[tuple[Chat, Route | None, bool]]
+def kb_notifications(
+    acc: Account, kinds: list[str], subjects: list[tuple[Chat, Route | None, bool]]
 ) -> InlineKeyboardMarkup:
-    """Account delivery hub: one button per category, subjects per chat, move all."""
+    """Account hub: one button per kind (T34 §4.1), subjects per chat, add / move all."""
     b = InlineKeyboardBuilder()
-    for cat in categories:
+    for kind in kinds:
+        k = KINDS[kind]
         b.button(
-            text=f"{CATEGORY_ICON.get(cat, '•')} {cat}",
-            callback_data=AccCb(key=acc.key, action="cat", arg=cat),
+            text=f"{k.icon} {k.title}", callback_data=AccCb(key=acc.key, action="kind", arg=kind)
         )
     b.adjust(2)
     rest = InlineKeyboardBuilder()
@@ -137,26 +150,37 @@ def kb_delivery(
             text=f"{_on(on)} 📚 subjects · {chat.name}{who}",
             callback_data=AccCb(key=acc.key, action="subj", arg=str(chat.id)),
         )
+    rest.button(text="➕ Add…", callback_data=AccCb(key=acc.key, action="addkind"))
     rest.button(text="➡️ Move all to…", callback_data=AccCb(key=acc.key, action="moveall"))
     rest.button(text="« Back", callback_data=AccCb(key=acc.key, action="card"))
-    rest.adjust(1)
+    rest.adjust(1, 1, 1)
     b.attach(rest)
     return b.as_markup()
 
 
-def kb_category(
-    acc: Account, category: str, rows: list[tuple[Route, Chat]]
-) -> InlineKeyboardMarkup:
+def kb_add_kind(acc: Account) -> InlineKeyboardMarkup:
+    """`➕ Add…`: what should I post? One line per kind with its blurb (T34 §4.2)."""
+    b = InlineKeyboardBuilder()
+    for kind in ADDABLE_KINDS:
+        k = KINDS[kind]
+        b.button(
+            text=f"{k.icon} {k.title} — {k.blurb}",
+            callback_data=AccCb(key=acc.key, action="add", arg=kind),
+        )
+    b.button(text="« Back", callback_data=AccCb(key=acc.key, action="notif"))
+    b.adjust(1)
+    return b.as_markup()
+
+
+def kb_kind(acc: Account, kind: str, rows: list[tuple[Route, Chat]]) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     for route, chat in rows:
         b.button(
             text=route_button_text(route, chat),
             callback_data=RouteCb(id=str(route.id), action="card"),
         )
-    b.button(
-        text="➕ Also deliver to…", callback_data=AccCb(key=acc.key, action="add", arg=category)
-    )
-    b.button(text="« Delivery", callback_data=AccCb(key=acc.key, action="delivery"))
+    b.button(text="➕ Also post to…", callback_data=AccCb(key=acc.key, action="add", arg=kind))
+    b.button(text="« Notifications", callback_data=AccCb(key=acc.key, action="notif"))
     b.adjust(1)
     return b.as_markup()
 
@@ -170,7 +194,9 @@ def kb_route(
     can_target: bool,
     back_text: str,
     back_cb: AccCb | ChatCb,
+    has_more: bool = False,
 ) -> InlineKeyboardMarkup:
+    """Card (L1): on/off + level-1 settings; `⚙️ More…` opens level 2 (T34 §4.3)."""
     b = InlineKeyboardBuilder()
     rid = str(route.id)
     if can_toggle:
@@ -186,9 +212,14 @@ def kb_route(
             )
     b.adjust(3)
     act = InlineKeyboardBuilder()
+    if can_settings and has_more:
+        act.button(text="⚙️ More…", callback_data=RouteCb(id=rid, action="more"))
     if can_target:
         act.button(text="📍 Change target", callback_data=RouteCb(id=rid, action="target"))
-    act.button(text="📨 Send test", callback_data=RouteCb(id=rid, action="test"))
+    if route.kind == "session":
+        act.button(text="📨 Preview", callback_data=RouteCb(id=rid, action="preview"))
+    else:
+        act.button(text="📨 Send test", callback_data=RouteCb(id=rid, action="test"))
     if route.error == ERR_TOPIC_DELETED and route.thread_id is None:
         act.button(text="✨ Recreate topic", callback_data=RouteCb(id=rid, action="recreate"))
     act.adjust(2)
@@ -196,6 +227,64 @@ def kb_route(
     back = InlineKeyboardBuilder()
     back.button(text=back_text, callback_data=back_cb)
     b.attach(back)
+    return b.as_markup()
+
+
+def kb_route_more(route: Route, settings: list[tuple[Setting, object]]) -> InlineKeyboardMarkup:
+    """`⚙️ More…` (L2): blocks and map options as cycling buttons, reset, back to the card."""
+    b = InlineKeyboardBuilder()
+    rid = str(route.id)
+    for setting, value in settings:
+        b.button(
+            text=setting.display(value),
+            callback_data=RouteCb(id=rid, action="set2", arg=setting.key),
+        )
+    b.adjust(2)
+    tail = InlineKeyboardBuilder()
+    tail.button(text="↩️ Reset to defaults", callback_data=RouteCb(id=rid, action="reset"))
+    tail.button(text="« Card", callback_data=RouteCb(id=rid, action="card"))
+    tail.adjust(2)
+    b.attach(tail)
+    return b.as_markup()
+
+
+def kb_session(session_id: ObjectId, *, live: bool) -> InlineKeyboardMarkup:
+    """Under a session message: ⏹ while it is open, 🗺 always (T34 §4.7)."""
+    b = InlineKeyboardBuilder()
+    sid = str(session_id)
+    if live:
+        b.button(text="⏹ End now", callback_data=SessionCb(id=sid, action="end"))
+    b.button(text="🗺 Progress", callback_data=SessionCb(id=sid, action="map"))
+    b.adjust(2)
+    return b.as_markup()
+
+
+def kb_progress(
+    key: str, opts: dict[str, str], *, accounts: list[Account], in_group: bool
+) -> InlineKeyboardMarkup:
+    """`/progress`: every option is a cycling button; the message re-renders in place."""
+    b = InlineKeyboardBuilder()
+    for opt in ("levels", "sort", "group"):
+        b.button(
+            text=f"{opt}: {option_label(opt, opts[opt])}",
+            callback_data=ProgressCb(key=key, opt=opt),
+        )
+    for opt in ("filter", "style", "diff"):
+        b.button(
+            text=f"{opt}: {option_label(opt, opts[opt])}",
+            callback_data=ProgressCb(key=key, opt=opt),
+        )
+    b.adjust(3, 3)
+    tail = InlineKeyboardBuilder()
+    for a in accounts:
+        if a.key != key:
+            tail.button(text=f"👤 {a.label}", callback_data=ProgressCb(key=a.key, opt="acc"))
+    tail.button(text="🔄", callback_data=ProgressCb(key=key, opt="refresh"))
+    if in_group:
+        tail.button(text="🧹 Close", callback_data=ProgressCb(key=key, opt="close"))
+    tail.adjust(3)
+    b.attach(tail)
+    assert PROGRESS_OPTIONS
     return b.as_markup()
 
 
@@ -240,7 +329,7 @@ def kb_routes_here(chat: Chat, rows: list[tuple[Route, Account | None]]) -> Inli
         who = f" · {acc.label}" if acc else ""
         where = f" → {route.thread_title}" if route.thread_id and route.thread_title else ""
         b.button(
-            text=f"{route.icon} {route.category}{who}{where}",
+            text=f"{route.icon} {route.title}{who}{where}",
             callback_data=RouteCb(id=str(route.id), action="card"),
         )
     b.button(text="« Chat", callback_data=ChatCb(chat=chat.id, action="card"))

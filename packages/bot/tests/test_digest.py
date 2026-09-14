@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from bson import ObjectId
 
 from wklabs.bot.digest import render
-from wklabs.bot.routing import category_for, target_for
+from wklabs.bot.routing import kind_for, target_for
 
 TZ = ZoneInfo("Europe/Kyiv")
 AT = datetime(2026, 8, 23, 12, 5, tzinfo=UTC)
@@ -46,11 +46,11 @@ def ev(kind, sid, **meta):
 
 
 def test_routing():
-    assert target_for(ev("reviewed", 1)) == ("main", "reviews")
+    assert target_for(ev("reviewed", 1)) == ("main", "live")
     assert target_for(ev("burned", 1)) == ("main", "milestones")
     assert target_for(ev("subject_updated", 1)) == (None, "subjects")
     assert target_for(ev("hidden", 1)) is None
-    assert category_for("nope") is None and category_for("level_passed") == "milestones"
+    assert kind_for("nope") is None and kind_for("level_passed") == "milestones"
 
 
 def test_reviews_digest():
@@ -61,7 +61,7 @@ def test_reviews_digest():
         ev("srs_down", 2, from_stage=6, to_stage=4),
         ev("unlocked", 3),
     ]
-    msgs = render("reviews", "main", events, SUBJECTS, TZ)
+    msgs = render("live", "main", events, SUBJECTS, TZ)
     assert len(msgs) == 1
     text = msgs[0]
     assert "<b>main</b> · 15:05" in text  # Kyiv = UTC+3 in summer
@@ -104,7 +104,7 @@ def test_long_digest_splits_and_truncates():
     ]
     for e in events:
         e["subject_type"] = "vocabulary"
-    msgs = render("reviews", "main", events, many, TZ)
+    msgs = render("live", "main", events, many, TZ)
     assert all(len(m) <= 4096 for m in msgs)
     assert "… +139 more" in msgs[-1]  # MAX_LINES = 60
     assert all(m.startswith("📝 <b>main</b>") for m in msgs)

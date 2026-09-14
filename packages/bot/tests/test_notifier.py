@@ -63,7 +63,7 @@ async def test_dry_run_private_route(db, caplog):
     ctx = make_ctx(db)
     acc = await ctx.accounts.create(ident(), "tok", owner_tg_id=42, source="test")
     await ctx.chats.ensure_private(42)
-    await ctx.routes.ensure_account_routes(acc.key, 42, created_by=42)
+    await ctx.routes.ensure_account_routes(acc.key, 42, created_by=42, kinds=("live",))
     await _seed(db, acc.key)
     caplog.set_level("INFO")
     assert await ctx.notifier.notify_pending() == 0  # dry-run sends nothing
@@ -88,6 +88,7 @@ async def test_preset_topics_and_delivery(db):
     bot = FakeBot()
     ctx = make_ctx(db, bot=bot)
     acc = await ctx.accounts.create(ident(), "tok", owner_tg_id=42, source="test")
+    await ctx.routes.ensure_account_routes(acc.key, 42, created_by=42, kinds=("live", "milestones"))
     chat = await ctx.chats.apply_inspection(-100, FORUM)
     res = await ctx.topics.apply_preset(chat, [acc], PRESET_PER_CATEGORY, by=42)
     assert res.labels == ["Vitalik"] and res.created == [
@@ -96,12 +97,12 @@ async def test_preset_topics_and_delivery(db):
     ]
     assert bot.topics == [(-100, "📝 Vitalik · reviews"), (-100, "🏆 Vitalik · milestones")]
     routes = await ctx.routes.for_account(acc.key)
-    assert [(r.category, r.thread_id) for r in routes] == [("milestones", 8), ("reviews", 7)]
+    assert [(r.kind, r.thread_id) for r in routes] == [("live", 7), ("milestones", 8)]
     await _seed(db, acc.key)
     assert await ctx.notifier.notify_pending() == 1
     assert bot.sent[0][:2] == (-100, 7)
     ev = await db.events.find_one({"kind": "reviewed"})
-    assert ev and ev["delivered"] == [routes[1].id] and ev["message_ids"] == [1]
+    assert ev and ev["delivered"] == [routes[0].id] and ev["message_ids"] == [1]
     assert await db.tg_messages.count_documents({"chat_id": -100}) == 1
     assert await ctx.notifier.notify_pending() == 0
     # a route without a topic posts to General; nothing is created on delivery
@@ -129,12 +130,13 @@ async def test_route_health_topic_deleted_and_forbidden(db):
     bot = FakeBot()
     ctx = make_ctx(db, bot=bot)
     acc = await ctx.accounts.create(ident(), "tok", owner_tg_id=42, source="test")
+    await ctx.routes.ensure_account_routes(acc.key, 42, created_by=42, kinds=("live", "milestones"))
     chat = await ctx.chats.apply_inspection(-100, FORUM)
     await ctx.topics.apply_preset(chat, [acc], PRESET_PER_CATEGORY, by=42)
     await _seed(db, acc.key)
     bot.fail[-100] = bad_request(-100, "message thread not found")
     assert await ctx.notifier.notify_pending() == 0
-    r = next(x for x in await ctx.routes.for_account(acc.key) if x.category == "reviews")
+    r = next(x for x in await ctx.routes.for_account(acc.key) if x.kind == "live")
     assert r.thread_id is None and r.error == ERR_TOPIC_DELETED and r.has_error
     assert r.thread_title == "📝 Vitalik · reviews"  # kept for ✨ Recreate
     chat = await ctx.chats.get(-100)

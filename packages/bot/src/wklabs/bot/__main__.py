@@ -43,13 +43,15 @@ from .topics import TopicManager
 log = logging.getLogger("wklabs.bot")
 
 PRIVATE_COMMANDS = [
-    BotCommand(command="accounts", description="your WaniKani accounts"),
+    BotCommand(command="accounts", description="your WaniKani accounts and notifications"),
+    BotCommand(command="progress", description="level map: SRS stages per level, what changed"),
     BotCommand(command="chats", description="chats and forums I post to"),
     BotCommand(command="status", description="levels, reviews due, last sync"),
     BotCommand(command="help", description="how it works"),
 ]
 GROUP_COMMANDS = [
-    BotCommand(command="setup", description="deliver digests to this chat"),
+    BotCommand(command="setup", description="post my notifications to this chat"),
+    BotCommand(command="progress", description="level map: SRS stages per level, what changed"),
     BotCommand(command="status", description="levels, reviews due, last sync"),
     BotCommand(command="ping", description="am I alive?"),
 ]
@@ -76,6 +78,7 @@ async def run() -> None:
     users = TgUserRepo(db, admin_ids=settings.tg_admin_ids, policy=settings.access_policy)
     chats, routes = ChatRepo(db), RouteRepo(db)
     await chats.normalize_legacy()
+    await routes.normalize_legacy()
     active = await accounts.list()
     log.info(
         "MongoDB connected: db=%s · active accounts=%s · policy=%s · admins=%s",

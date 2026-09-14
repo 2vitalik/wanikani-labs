@@ -54,7 +54,7 @@ from .common import (
     visible_chat,
     visible_or_alert,
 )
-from .delivery import resume_target
+from .notifications import resume_target
 
 log = logging.getLogger(__name__)
 router = Router(name="chats")
@@ -348,22 +348,22 @@ async def cb_global_toggle(
     chat = await visible_or_alert(ctx, cb, user, callback_data.chat, bot=bot)
     if chat is None:
         return
-    category = "subjects" if callback_data.action == "subj" else "system"
-    if category == "system" and not user.is_admin:
+    kind = "subjects" if callback_data.action == "subj" else "system"
+    if kind == "system" and not user.is_admin:
         await cb.answer(texts.not_allowed(), show_alert=True)
         return
     current = next(
         (
             r
             for r in await ctx.routes.for_chat(chat.id, include_disabled=True)
-            if r.account is None and r.category == category
+            if r.account is None and r.kind == kind
         ),
         None,
     )
     if current and user.id in current.subscribers:
-        await ctx.routes.unsubscribe(category, chat.id, user.id)
+        await ctx.routes.unsubscribe(kind, chat.id, user.id)
     else:
-        await ctx.routes.subscribe(category, chat.id, user.id)
+        await ctx.routes.subscribe(kind, chat.id, user.id)
     text, kb = await chat_card_screen(ctx, user, chat, in_group=in_group(cb))
     await edit(cb, text, kb)
 

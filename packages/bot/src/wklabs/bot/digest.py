@@ -1,77 +1,16 @@
-"""Render a batch of events of one (account, category) into Telegram HTML messages (pure)."""
+"""Render a batch of events of one (account, kind) into Telegram HTML messages (pure)."""
 
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
 from html import escape
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from wklabs.lib.resources import SRS_STAGES
-from wklabs.lib.subjects import subject_label, subject_url
+from .render.common import STAGE_EMOJI, chunk, stage_name, subject_of, when
 
 Json = dict[str, Any]
-
-MAX_LEN = 3900  # Telegram hard limit is 4096
-MAX_LINES = 60  # per message before "… +N more"
-
-STAGE_EMOJI = {
-    0: "🔒",
-    1: "🩷",
-    2: "🩷",
-    3: "🩷",
-    4: "🩷",
-    5: "💜",
-    6: "💜",
-    7: "💙",
-    8: "🩵",
-    9: "🔥",
-}
-
-
-def _stage(n: int | None) -> str:
-    return SRS_STAGES.get(int(n), str(n)) if n is not None else "?"
-
-
-def _link(subject: Json | None, label: str) -> str:
-    url = subject_url(subject)
-    text = escape(label)
-    return f'<a href="{escape(url)}">{text}</a>' if url else text
-
-
-def _subject(ev: Json, subjects: dict[int, Json]) -> str:
-    sid = ev.get("subject_id")
-    subj = subjects.get(int(sid)) if sid is not None else None
-    return _link(subj, subject_label(subj, sid, ev.get("subject_type")))
-
-
-def _when(at: datetime, tz: ZoneInfo) -> str:
-    return at.astimezone(tz).strftime("%H:%M")
-
-
-def _chunk(header: str, lines: list[str], footer: str = "") -> list[str]:
-    """Split into messages ≤ MAX_LEN; each chunk repeats the header."""
-    out: list[str] = []
-    buf: list[str] = []
-    size = len(header) + 1
-    shown = 0
-    for ln in lines:
-        if shown >= MAX_LINES:
-            break
-        if size + len(ln) + 1 > MAX_LEN and buf:
-            out.append("\n".join([header, *buf]))
-            buf, size = [], len(header) + 1
-        buf.append(ln)
-        size += len(ln) + 1
-        shown += 1
-    rest = len(lines) - shown
-    if rest > 0:
-        buf.append(f"… +{rest} more")
-    if footer:
-        buf.append(footer)
-    out.append("\n".join([header, *buf]) if buf else header)
-    return out
+_stage, _subject, _when, _chunk = stage_name, subject_of, when, chunk
 
 
 # ---------------------------------------------------------------- reviews
@@ -219,7 +158,7 @@ def render_subjects(events: list[Json], subjects: dict[int, Json], tz: ZoneInfo)
 
 
 def render(
-    category: str,
+    kind: str,
     label: str | None,
     events: list[Json],
     subjects: dict[int, Json],
@@ -227,10 +166,10 @@ def render(
     *,
     items: str = "all",
 ) -> list[str]:
-    if category == "subjects":
+    if kind == "subjects":
         return render_subjects(events, subjects, tz)
-    if category == "reviews":
+    if kind == "live":
         return render_reviews(label or "?", events, subjects, tz, items=items)
-    if category == "milestones":
+    if kind == "milestones":
         return render_milestones(label or "?", events, subjects, tz)
     return []

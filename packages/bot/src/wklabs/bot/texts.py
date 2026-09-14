@@ -21,15 +21,17 @@ from wklabs.lib.chats import (
     hints,
 )
 from wklabs.lib.delivery import (
-    CATEGORY_ICON,
     ERR_FORBIDDEN,
     ERR_NO_RIGHTS,
     ERR_TOPIC_CLOSED,
     ERR_TOPIC_DELETED,
+    KINDS,
     PRESET_LABEL,
     Route,
+    kind_icon,
+    kind_title,
 )
-from wklabs.lib.route_settings import help_line
+from wklabs.lib.notify_settings import help_line
 from wklabs.lib.sync import SyncResult
 from wklabs.lib.users import PENDING, TgUser
 
@@ -48,8 +50,8 @@ def e(s: object) -> str:
 def welcome_new(policy: str, tg_id: int) -> str:
     lines = [
         "👋 <b>wanikani-labs</b> — WaniKani progress tracker.",
-        "I poll your account every 5 min and post digests: reviews, SRS moves, "
-        "level-ups, content changes. A read-only token is enough.",
+        "I poll your account every 5 min and post a summary after each study session, "
+        "plus level-ups, burns and more. A read-only token is enough.",
         "",
     ]
     if policy == "approve":
@@ -79,16 +81,21 @@ def continue_private() -> str:
 def help_text() -> str:
     return (
         "<b>wanikani-labs bot</b>\n"
-        "/accounts — your WaniKani accounts: add, rename, pause, delivery\n"
+        "/accounts — your WaniKani accounts: add, rename, pause, notifications\n"
+        "/progress — level map: SRS stages per level and what changed\n"
         "/chats — chats and forums I post to\n"
         "/status — levels, reviews due, last sync\n"
         "/help — this\n\n"
+        "<b>Notifications:</b> /accounts → account → 📬 Notifications. Kinds: 🧘 session "
+        "summary (after each study session, one live message while you study), 📝 live "
+        "reviews, 🏆 milestones. Add as many as you like, each with its own target and "
+        "settings.\n\n"
         f"<b>Token:</b> create one at {TOKEN_URL} — read-only is enough (leave all "
         "checkboxes off). Send it to me here in private; I delete your message at once "
         "and store the token encrypted.\n\n"
         "<b>Chats &amp; forums:</b> /chats — where I post. ➕ picks a chat from your list; "
         "Telegram adds me with the rights I need. In a forum choose a preset — one topic per "
-        "category, per account, one for all, or General — then move any digest to any topic. "
+        "kind, per account, one for all, or General — then move any notification to any topic. "
         "I only know topics I created or saw messages in. Prefer commands? Add me to the chat "
         "and send /setup there.\n"
         "<b>Rights I need:</b> post messages; forums — admin + <i>Manage Topics</i>."
@@ -129,9 +136,9 @@ def account_card(
     if routes:
         for r, chat in routes:
             where = e(chat.name) + (f" › {e(r.thread_title)}" if r.thread_title else "")
-            lines.append(f"{CATEGORY_ICON.get(r.category, '•')} {r.category} → {where}")
+            lines.append(f"{r.icon} {r.title} → {where}")
     else:
-        lines.append("no delivery routes — 📬 Delivery")
+        lines.append("no notifications — 📬 Notifications")
     return "\n".join(lines)
 
 
@@ -196,7 +203,7 @@ def added_done(acc: Account, ident: WkIdentity, res: SyncResult, *, private: boo
     if res.errors:
         lines.append("❌ " + e("; ".join(res.errors[:3])))
     if private:
-        lines.append("Digests will arrive here, in this chat.")
+        lines.append("I'll post a summary here after each study session, and your milestones.")
         lines.append("Want a group or forum instead? /chats → ➕ Add a chat.")
     return "\n".join(lines)
 
@@ -233,30 +240,55 @@ def _where(route: Route, chat: Chat) -> str:
     return where
 
 
-def delivery(acc: Account, rows: list[tuple[Route, Chat]]) -> str:
-    lines = [f"📬 <b>Delivery — {e(acc.label)}</b>"]
-    if not rows:
-        lines.append("no routes yet")
+def notifications(acc: Account, rows: list[tuple[Route, Chat]], kinds: list[str]) -> str:
+    lines = [f"📬 <b>Notifications — {e(acc.label)}</b>"]
     for r, chat in rows:
         marks = " 🔕" if r.settings.get("silent") else ""
         marks += f" ⚠️ {e(r.error)}" if r.has_error else ""
-        lines.append(f"{r.icon} {r.category} → {_where(r, chat)}{marks}")
+        lines.append(f"{r.icon} {r.title} → {_where(r, chat)}{marks}")
+    for kind in kinds:
+        if not any(r.kind == kind for r, _ in rows):
+            lines.append(f"{kind_icon(kind)} {kind_title(kind)} → off")
     lines.append("")
     lines.append(
-        "Tap a category to change where it goes or how. 📚 subjects = WaniKani content "
-        "changes, shared per chat."
+        "Tap a kind to change where it goes or how; ➕ Add… for one more (any number, "
+        "each with its own target and settings). 📚 subjects = WaniKani content changes, "
+        "shared per chat."
     )
     return "\n".join(lines)
 
 
-def category_screen(acc: Account, category: str, rows: list[tuple[Route, Chat]]) -> str:
-    icon = CATEGORY_ICON.get(category, "•")
-    lines = [f"{icon} <b>{category} — {e(acc.label)}</b>"]
+def add_kind(acc: Account) -> str:
+    return f"➕ <b>What should I post for {e(acc.label)}?</b>\nPick a kind, then where it goes."
+
+
+def kind_screen(acc: Account, kind: str, rows: list[tuple[Route, Chat]]) -> str:
+    k = KINDS.get(kind)
+    lines = [f"{kind_icon(kind)} <b>{kind_title(kind)} — {e(acc.label)}</b>"]
+    if k is not None:
+        lines.append(e(k.blurb))
     if not rows:
-        lines.append("goes nowhere yet — ➕ Also deliver to…")
+        lines.append("goes nowhere yet — ➕ Also post to…")
     else:
         lines.append("Tap a target to switch it on/off, change the topic or settings.")
     return "\n".join(lines)
+
+
+def route_more(route: Route, label: str | None) -> str:
+    head = f"⚙️ <b>{route.title} — more</b>" + (f" — {e(label)}" if label else "")
+    return f"{head}\n{help_line(route.kind, 2)}"
+
+
+def preview_result(error: str | None) -> str:
+    return "📨 preview sent to the target" if error is None else f"❌ {error}"
+
+
+def session_ended() -> str:
+    return "⏹ ended — posting the summary"
+
+
+def no_progress_accounts() -> str:
+    return "No WaniKani accounts yet — /accounts in private to add one."
 
 
 def route_card(
@@ -265,7 +297,7 @@ def route_card(
     lines = []
     if note:
         lines.append(note)
-    head = f"{route.icon} <b>{route.category}</b>" + (f" — {e(label)}" if label else "")
+    head = f"{route.icon} <b>{route.title}</b>" + (f" — {e(label)}" if label else "")
     lines.append(head)
     where = f"→ {_where(route, chat)}" + ("" if route.enabled else " · off")
     if route.account is None:
@@ -277,23 +309,21 @@ def route_card(
     if view_only:
         lines.append("view only — not your account")
     else:
-        lines.append(help_line(route.category))
+        lines.append(help_line(route.kind))
     return "\n".join(lines)
 
 
-def pick_chat_target(label: str | None, category: str, *, mode: str) -> str:
-    what = f"{CATEGORY_ICON.get(category, '•')} {category}" + (f" of {e(label)}" if label else "")
+def pick_chat_target(label: str | None, kind: str, *, mode: str) -> str:
+    what = f"{kind_icon(kind)} {kind_title(kind)}" + (f" of {e(label)}" if label else "")
     if mode == "all":
-        return f"Move all digests of <b>{e(label)}</b> to…"
+        return f"Move all notifications of <b>{e(label)}</b> to…"
     if mode == "add":
-        return f"Also deliver {what} to…"
+        return f"Post {what} to…"
     return f"Where should {what} go?"
 
 
-def pick_topic(chat: Chat, category: str) -> str:
-    lines = [
-        f"🗂 <b>{e(chat.name)}</b> — which topic for {CATEGORY_ICON.get(category, '•')} {category}?"
-    ]
+def pick_topic(chat: Chat, kind: str) -> str:
+    lines = [f"🗂 <b>{e(chat.name)}</b> — which topic for {kind_icon(kind)} {kind_title(kind)}?"]
     if chat.topics_possible:
         lines.append("Auto topics follow the account name; picked ones I never rename or delete.")
     else:
@@ -306,7 +336,7 @@ def target_set(route: Route, chat: Chat) -> str:
 
 
 def stale() -> str:
-    return "This screen is stale — open 📬 Delivery again."
+    return "This screen is stale — open 📬 Notifications again."
 
 
 def not_allowed() -> str:
@@ -427,7 +457,7 @@ def chat_card(
                 others = len(r.subscribers) - (1 if me else 0)
                 who = " · you" if me else ""
                 who += f" + {others}" if others else ""
-            lines.append(f"{r.icon} {r.category}{who}{where}{err}")
+            lines.append(f"{r.icon} {r.title}{who}{where}{err}")
         if len(owners) > 1:
             lines.append(f"{len(owners)} people deliver here")
     else:
@@ -444,9 +474,9 @@ def presets_screen(chat: Chat) -> str:
     lines = [f"📬 <b>Deliver to «{e(chat.name)}»</b> — all your accounts move here."]
     if chat.topics_possible:
         lines.append(
-            "Pick a preset: topic per category (📝 Name · reviews, 🏆 Name · milestones), "
+            "Pick a preset: topic per kind (🧘 Name · sessions, 🏆 Name · milestones), "
             "topic per account (Name), one topic for all (WaniKani), or General. "
-            "You can move any digest to any topic afterwards."
+            "You can move any notification to any topic afterwards."
         )
     elif chat.is_forum:
         lines.append("Topics need Manage Topics — for now digests go to General.")
@@ -552,7 +582,7 @@ def removed_from_chat(chat_name: str, labels: list[str]) -> str:
 
 
 def route_error(route: Route, chat_name: str, label: str | None) -> str:
-    what = f"{route.icon} {route.category}" + (f" · {e(label)}" if label else "")
+    what = f"{route.icon} {route.title}" + (f" · {e(label)}" if label else "")
     return f"⚠️ {what} → «{e(chat_name)}»: {ROUTE_ERRORS.get(route.error or '', e(route.error))}"
 
 

@@ -105,6 +105,8 @@ class FakeBot:
         self.chats: dict[int, ChatFullInfo] = {}
         self.members: dict[tuple[int, int], ChatMember] = {}
         self.fail: dict[int, Exception] = {}  # chat_id → raised by send_message
+        self.edited: list[tuple[int, int, str]] = []
+        self.gone: set[int] = set()  # message ids whose edit fails ("message to edit not found")
         self._thread = 6
 
     async def send_message(self, chat_id: int, text: str, **kw: Any) -> SimpleNamespace:
@@ -112,6 +114,16 @@ class FakeBot:
             raise self.fail[chat_id]
         self.sent.append((chat_id, kw.get("message_thread_id"), text))
         return SimpleNamespace(message_id=len(self.sent))
+
+    async def edit_message_text(
+        self, text: str, *, chat_id: int, message_id: int, **kw: Any
+    ) -> SimpleNamespace:
+        if message_id in self.gone:
+            raise TelegramBadRequest(
+                SendMessage(chat_id=chat_id, text=""), "Bad Request: message to edit not found"
+            )
+        self.edited.append((chat_id, message_id, text))
+        return SimpleNamespace(message_id=message_id)
 
     async def create_forum_topic(self, chat_id: int, name: str, **kw: Any) -> SimpleNamespace:
         self._thread += 1

@@ -8,14 +8,29 @@ from aiogram.fsm.state import State, StatesGroup
 
 class AccCb(CallbackData, prefix="acc"):
     key: str
-    # card delivery rename token pause resume remove remove_yes · cat add moveall subj
+    # card notif rename token pause resume remove remove_yes · kind addkind add moveall subj
     action: str
     arg: str = ""
 
 
 class RouteCb(CallbackData, prefix="rt"):
     id: str  # ObjectId hex
-    action: str = "toggle"  # card toggle set target test recreate
+    action: str = "toggle"  # card toggle set set2 more reset target test preview recreate
+    arg: str = ""
+
+
+class SessionCb(CallbackData, prefix="ss"):
+    """Buttons under a live/final session message."""
+
+    id: str  # session ObjectId hex
+    action: str = "end"  # end map
+
+
+class ProgressCb(CallbackData, prefix="pg"):
+    """`/progress` screen: cycle an option, switch account, refresh, close."""
+
+    key: str  # account key
+    opt: str  # levels sort group filter style diff · acc refresh close
     arg: str = ""
 
 

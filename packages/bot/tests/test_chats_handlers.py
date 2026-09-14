@@ -156,7 +156,7 @@ async def test_setup_light_and_card_in_group(db):
     # the shared card shows everyone's routes with owners
     await ctx.routes.ensure_account_routes(acc.key, -100, created_by=42)
     text, kb = await chat_card_screen(ctx, user(7), chat, in_group=True)
-    assert "📝 reviews · Vitalik (theirs)" in text
+    assert "🧘 Session summary · Vitalik (theirs)" in text
     btns = [b.text for row in kb.inline_keyboard for b in row]
     assert "🚫 Stop here" not in btns and "🧹 Close" in btns
 

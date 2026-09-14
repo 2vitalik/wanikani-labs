@@ -17,7 +17,7 @@ from wklabs.lib.accounts import Account, AccountRepo
 from wklabs.lib.chats import Chat, ChatRepo, Topic
 from wklabs.lib.delivery import (
     BLUE,
-    CATEGORY_COLOR,
+    KIND_COLOR,
     PRESET_GENERAL,
     PRESET_PER_CATEGORY,
     PURPLE,
@@ -82,13 +82,13 @@ class TopicManager:
     async def apply_preset(
         self, chat: Chat, accounts: list[Account], preset: str, *, by: int
     ) -> PresetResult:
-        """All categories of these accounts → this chat, topics per preset (T26 §1)."""
+        """Every enabled notification of these accounts → this chat, topics per preset (T26 §1)."""
         res = PresetResult()
         can_topics = chat.is_forum and preset != PRESET_GENERAL and self.bot is not None
         for acc in accounts:
             res.labels.append(acc.label)
             for route in await self.routes.move_account(acc.key, chat.id, created_by=by):
-                name = preset_topic_name(preset, route.category, acc.label) if can_topics else None
+                name = preset_topic_name(preset, route.kind, acc.label) if can_topics else None
                 if name is None:
                     await self.routes.set_thread(route.id, None, None, by=by)
                     res.general = True
@@ -99,9 +99,7 @@ class TopicManager:
                     res.general = True
                     continue
                 color = (
-                    CATEGORY_COLOR.get(route.category, BLUE)
-                    if preset == PRESET_PER_CATEGORY
-                    else PURPLE
+                    KIND_COLOR.get(route.kind, BLUE) if preset == PRESET_PER_CATEGORY else PURPLE
                 )
                 topic = await self.find_or_create(chat, name, color, res)
                 await self.routes.set_thread(route.id, topic.thread_id, topic.name, by=by)
@@ -114,8 +112,8 @@ class TopicManager:
         chat = await self.chats.get(route.chat_id)
         if chat is None or not chat.topics_possible or self.bot is None:
             return None
-        name = route.thread_title or f"{route.icon} {route.category}"
-        topic = await self.create(chat.id, name, color=CATEGORY_COLOR.get(route.category, BLUE))
+        name = route.thread_title or f"{route.icon} {route.kind}"
+        topic = await self.create(chat.id, name, color=KIND_COLOR.get(route.kind, BLUE))
         await self.routes.set_thread(route.id, topic.thread_id, topic.name)
         # sibling routes that lost the same topic (kept its title) come along
         for other in await self.routes.for_chat(chat.id, include_disabled=True):

@@ -1,9 +1,11 @@
-"""Deliver pending events as digests along routes; idempotent via `events.notified_at`.
+"""Deliver notifications along routes: instant digests, session summaries (live + final).
 
-One event can travel several routes (shared chats, global categories);
-`events.delivered` remembers which routes already got it, so a crash in the
-middle does not resend. A failing route is marked (`status: error`) and its
-owner told once; success clears the mark.
+Instant kinds (`live · milestones · subjects · system`) travel per event, idempotent
+via `events.notified_at` / `events.delivered`. Sessions (T32 §7) run after every
+sync per (account, gap): new instants extend or open sessions, a successful poll
+past the gap closes them; a live message is *edited* in place (Telegram does not
+notify on edits — zero noise) and finalized on close, tracked in `reports`.
+A failing route is marked (`status: error`) and its owner told once.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
+from datetime import datetime
 from html import escape
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -30,14 +33,26 @@ from wklabs.lib.delivery import (
     Route,
     RouteRepo,
 )
-from wklabs.lib.route_settings import effective
+from wklabs.lib.notify_settings import effective
+from wklabs.lib.progress import (
+    Matrix,
+    current_level,
+    due_count,
+    reverse_apply,
+    stage_matrix,
+    subject_index,
+)
+from wklabs.lib.reports import ReportRepo, text_hash
+from wklabs.lib.sessions import Session, SessionRepo
+from wklabs.lib.stats import window_stats
 from wklabs.lib.subjects import load_subjects
 from wklabs.lib.timeutil import utcnow
 from wklabs.lib.users import TgUserRepo
 
 from . import texts
 from .digest import render
-from .keyboards import kb_route_error
+from .keyboards import kb_route_error, kb_session
+from .render.session import SessionView, render_session
 from .routing import target_for
 from .topics import TopicManager
 
@@ -46,6 +61,7 @@ Json = dict[str, Any]
 
 NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
 PER_SEND_DELAY = 0.3
+SESSION_KIND = "session"
 
 
 def classify_bad_request(exc: Exception) -> str | None:
@@ -74,6 +90,8 @@ class Notifier:
         users: TgUserRepo,
         topics: TopicManager,
         tz: str,
+        sessions: SessionRepo | None = None,
+        reports: ReportRepo | None = None,
     ) -> None:
         self.db = db
         self.bot = bot
@@ -83,6 +101,8 @@ class Notifier:
         self.users = users
         self.topics = topics
         self.tz = ZoneInfo(tz)
+        self.sessions = sessions or SessionRepo(db)
+        self.reports = reports or ReportRepo(db)
 
     @property
     def dry_run(self) -> bool:
@@ -90,7 +110,7 @@ class Notifier:
 
     # ----------------------------------------------------------- events
     async def notify_pending(self, *, limit: int = 5000) -> int:
-        """Send un-notified events grouped by (account, category) → routes; returns sent count."""
+        """Send un-notified events grouped by (account, kind) → routes; returns sent count."""
         pending: list[Json] = []
         async for ev in self.db.events.find({"notified_at": None}, sort=[("at", 1)], limit=limit):
             pending.append(ev)
@@ -107,8 +127,8 @@ class Notifier:
         labels = await self.accounts.labels()
         for target, evs in by_target.items():
             assert target is not None
-            account, category = target
-            routes = await self.routes.for_target(account, category)
+            account, kind = target
+            routes = await self.routes.for_target(account, kind)
             if not routes:
                 await self._mark(evs, now, skipped=True, no_route=True)
                 continue
@@ -123,7 +143,7 @@ class Notifier:
                 opts = effective(route)
                 items = str(opts.get("items", "all"))
                 if items not in rendered:
-                    rendered[items] = render(category, label, evs, subjects, self.tz, items=items)
+                    rendered[items] = render(kind, label, evs, subjects, self.tz, items=items)
                 msg_ids = await self.send_route(
                     route, rendered[items], silent=bool(opts.get("silent"))
                 )
@@ -144,15 +164,229 @@ class Notifier:
             {"$set": {"notified_at": now, "dry_run": self.dry_run, **flags}},
         )
 
+    # --------------------------------------------------------- sessions
+    async def notify_sessions(self, *, accounts: list[str] | None = None) -> int:
+        """Session pass (T32 §7.2): ingest new instants, close idle, post/edit summaries."""
+        by_account: dict[str, list[Route]] = defaultdict(list)
+        for r in await self.routes.for_kind(SESSION_KIND):
+            if r.account and (not accounts or r.account in accounts):
+                by_account[r.account].append(r)
+        sent = 0
+        labels = await self.accounts.labels()
+        for account, routes in by_account.items():
+            acc = await self.accounts.get(account)
+            if acc is None or not acc.is_active:
+                continue
+            by_gap: dict[int, list[Route]] = defaultdict(list)
+            for r in routes:
+                by_gap[int(effective(r)["gap"])].append(r)
+            last_ok = await self.last_ok(account)
+            now = utcnow()
+            label = labels.get(account, account)
+            for gap, group in by_gap.items():
+                touched = {s.id for s in await self.sessions.ingest(account, gap, now=now)}
+                closed = await self.sessions.close_idle(account, gap, last_ok, now=now)
+                if closed is not None:
+                    touched.add(closed.id)
+                for s in await self.sessions.pending(account, gap):
+                    sent += await self.deliver_session(s, group, label, final=True)
+                    await self.sessions.mark_reported([s.id], now)
+                cur = await self.sessions.current(account, gap)
+                live = [r for r in group if effective(r)["live"]]
+                if cur is not None and live and cur.id in touched:
+                    sent += await self.deliver_session(cur, live, label, final=False)
+        return sent
+
+    async def last_ok(self, account: str) -> datetime | None:
+        """The silence is proven only when both review sources polled fine (T32 §2)."""
+        stamps: list[datetime] = []
+        for res in ("review_statistics", "assignments"):
+            st = await self.db.sync_state.find_one({"_id": f"{account}:{res}"}, {"last_ok_at": 1})
+            ok = st.get("last_ok_at") if st else None
+            if ok is None:
+                return None
+            stamps.append(ok)
+        return min(stamps)
+
+    async def build_view(
+        self, session: Session, label: str, *, need_map: bool, live: bool, preview: bool = False
+    ) -> SessionView:
+        events = await self.sessions.events(session)
+        ids = {int(e["subject_id"]) for e in events if e.get("subject_id") is not None}
+        subjects = await load_subjects(self.db, ids)
+        stats = window_stats(events, subjects)
+        after: Matrix | None = None
+        before: Matrix | None = None
+        if need_map:
+            index = await subject_index(self.db)
+            after = await stage_matrix(self.db, session.account, index)
+            before = reverse_apply(after, events, index)
+        return SessionView(
+            label=label,
+            session=session,
+            stats=stats,
+            subjects=subjects,
+            tz=self.tz,
+            live=live,
+            preview=preview,
+            due=await due_count(self.db, session.account, utcnow()),
+            level=await current_level(self.db, session.account),
+            after=after,
+            before=before,
+        )
+
+    async def deliver_session(
+        self, session: Session, routes: list[Route], label: str, *, final: bool
+    ) -> int:
+        todo = [r for r in routes if not (final and r.id in session.delivered)]
+        if not todo:
+            return 0
+        opts_by = {r.id: effective(r) for r in todo}
+        need_map = any(o.get("changes") or o.get("map") for o in opts_by.values())
+        view = await self.build_view(session, label, need_map=need_map, live=not final)
+        if final:
+            await self.sessions.set_stats(session.id, view.stats.to_doc())
+        n_items = view.stats.n_items + len(view.stats.lessons)
+        sent = 0
+        for route in todo:
+            opts = opts_by[route.id]
+            existing = await self.reports.get(route.id, session.key)
+            if final and n_items < int(opts.get("min_items", 1)) and existing is None:
+                await self.sessions.mark_delivered(session.id, route.id)  # too small: no message
+                continue
+            texts_ = render_session(view, opts)
+            kb = kb_session(session.id, live=not final)
+            ids = await self.send_or_edit(
+                route,
+                session.key,
+                texts_,
+                final=final,
+                silent=bool(opts.get("silent")),
+                reply_markup=kb,
+            )
+            if final and (ids or self.dry_run):
+                await self.sessions.mark_delivered(session.id, route.id)
+            sent += len(ids)
+        return sent
+
+    async def preview_session(self, route: Route) -> str | None:
+        """`📨 Preview`: the last closed session rendered with the route's current settings."""
+        if route.account is None:
+            return "not a session route"
+        opts = effective(route)
+        recent = await self.sessions.recent(route.account, int(opts["gap"]), limit=1)
+        if not recent:
+            return "no closed session yet for this gap"
+        labels = await self.accounts.labels()
+        view = await self.build_view(
+            recent[0],
+            labels.get(route.account, route.account),
+            need_map=bool(opts.get("changes") or opts.get("map")),
+            live=False,
+            preview=True,
+        )
+        ids = await self.send_route(
+            route,
+            render_session(view, opts),
+            silent=True,
+            reply_markup=kb_session(recent[0].id, live=False),
+        )
+        return None if ids or self.dry_run else "send failed"
+
     # ------------------------------------------------------------- send
+    async def send_or_edit(
+        self,
+        route: Route,
+        key: str,
+        texts_: list[str],
+        *,
+        final: bool,
+        silent: bool = False,
+        reply_markup: InlineKeyboardMarkup | None = None,
+    ) -> list[int]:
+        """One report per (route, key): edit the earlier message when there is one."""
+        h = text_hash(texts_)
+        rep = await self.reports.get(route.id, key)
+        if rep is not None and rep.message_id is not None and not rep.dry_run:
+            if rep.text_hash == h and rep.final == final:
+                return rep.message_ids
+            if await self.edit_one(route.chat_id, rep.message_id, texts_[0], reply_markup):
+                await self.reports.upsert(
+                    route.id,
+                    key,
+                    chat_id=rep.chat_id,
+                    thread_id=rep.thread_id,
+                    message_ids=rep.message_ids,
+                    final=final,
+                    text_hash=h,
+                )
+                return rep.message_ids
+        thread = await self.topics.ensure_thread(route)
+        ids = await self.send_route(route, texts_, silent=silent, reply_markup=reply_markup)
+        if ids or self.dry_run:
+            await self.reports.upsert(
+                route.id,
+                key,
+                chat_id=route.chat_id,
+                thread_id=thread,
+                message_ids=ids,
+                final=final,
+                text_hash=h,
+                dry_run=self.dry_run,
+            )
+        return ids
+
+    async def edit_one(
+        self,
+        chat_id: int,
+        message_id: int,
+        text: str,
+        reply_markup: InlineKeyboardMarkup | None = None,
+    ) -> bool:
+        """Edit in place; False when the message is gone (→ send a new one)."""
+        if self.bot is None:
+            log.info("[dry-run edit → %s/%s]\n%s", chat_id, message_id, text)
+            return True
+        try:
+            await self.bot.edit_message_text(
+                text,
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=reply_markup,
+                link_preview_options=NO_PREVIEW,
+            )
+        except TelegramRetryAfter as exc:
+            await asyncio.sleep(exc.retry_after + 1)
+            return await self.edit_one(chat_id, message_id, text, reply_markup)
+        except TelegramBadRequest as exc:
+            if "not modified" in str(exc):
+                return True
+            log.warning("edit %s/%s failed: %s", chat_id, message_id, exc)
+            return False
+        except Exception:
+            log.exception("edit %s/%s failed", chat_id, message_id)
+            return False
+        return True
+
     async def send_route(
-        self, route: Route, texts_: list[str], *, silent: bool = False
+        self,
+        route: Route,
+        texts_: list[str],
+        *,
+        silent: bool = False,
+        reply_markup: InlineKeyboardMarkup | None = None,
     ) -> list[int]:
         thread = await self.topics.ensure_thread(route)
         ids: list[int] = []
-        for t in texts_:
+        for i, t in enumerate(texts_):
+            last = i == len(texts_) - 1
             mid, err = await self.send_one(
-                route.chat_id, thread, t, meta={"route": route.id}, silent=silent
+                route.chat_id,
+                thread,
+                t,
+                meta={"route": route.id},
+                silent=silent,
+                reply_markup=reply_markup if last else None,
             )
             if err is not None:
                 await self._route_failed(route, err)

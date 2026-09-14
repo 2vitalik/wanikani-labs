@@ -72,11 +72,11 @@ def labels(kb) -> list[str]:
 
 def test_account_card_and_keyboards():
     forum = chat()
-    route = Route(ObjectId(), "07fff792", "reviews", -100, 7, "📝 Vitalik · reviews", True, 42, NOW)
+    route = Route(ObjectId(), "07fff792", "live", -100, 7, "📝 Vitalik · reviews", True, 42, NOW)
     text = texts.account_card(acc(), [(route, forum)], last_sync=NOW, tz=ZoneInfo("UTC"), now=NOW)
-    assert "…ab12" in text and "📝 reviews → WK › 📝 Vitalik · reviews" in text
+    assert "…ab12" in text and "📝 Live reviews → WK › 📝 Vitalik · reviews" in text
     text = texts.account_card(acc("auth_error"), [], last_sync=None, tz=ZoneInfo("UTC"), now=NOW)
-    assert "token rejected" in text and "no delivery routes" in text
+    assert "token rejected" in text and "no notifications" in text
     kb = kb_accounts([acc()], {"07fff792": 12})
     assert kb.inline_keyboard[0][0].text == "🟢 Vitalik · L39 · 12 due"
     assert kb.inline_keyboard[-1][0].text == "➕ Add account"
@@ -87,11 +87,11 @@ def test_account_card_and_keyboards():
 
 
 def test_chat_card_text_and_hints():
-    route = Route(ObjectId(), "07fff792", "reviews", -100, 7, "📝 Vitalik · reviews", True, 42, NOW)
+    route = Route(ObjectId(), "07fff792", "live", -100, 7, "📝 Vitalik · reviews", True, 42, NOW)
     text = texts.chat_card(chat(preset="per_category"), [(route, acc())], viewer=42)
     assert "🗂 <b>WK</b> · forum" in text and "topics ✅" in text and "delete ✅" in text
-    assert "📝 reviews · Vitalik → 📝 Vitalik · reviews" in text and "(theirs)" not in text
-    assert "last preset: topic per category" in text
+    assert "📝 Live reviews · Vitalik → 📝 Vitalik · reviews" in text and "(theirs)" not in text
+    assert "last preset: topic per kind" in text
     text = texts.chat_card(chat(), [(route, acc(owner=7))], viewer=42)
     assert "(theirs)" in text
     assert "Nothing delivered here yet." in texts.chat_card(chat(), [], viewer=42)
@@ -131,7 +131,7 @@ def test_chat_keyboards():
     kb = kb_chat_card(chat(status=KICKED), has_accounts=True, has_routes=True, in_group=False)
     assert labels(kb) == ["🔄 Refresh", "🚫 Stop here", "🗑 Forget", "« Chats"]
     assert labels(kb_presets(chat()))[:4] == [
-        "✨ topic per category",
+        "✨ topic per kind",
         "✨ topic per account",
         "✨ one topic for all",
         "💬 General (no topics)",

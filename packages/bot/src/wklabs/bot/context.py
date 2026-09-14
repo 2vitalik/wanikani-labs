@@ -14,6 +14,8 @@ from wklabs.lib.accounts import AccountRepo
 from wklabs.lib.chats import ChatRepo
 from wklabs.lib.db import Db
 from wklabs.lib.delivery import RouteRepo
+from wklabs.lib.reports import ReportRepo
+from wklabs.lib.sessions import SessionRepo
 from wklabs.lib.settings import Settings
 from wklabs.lib.sync import SyncEngine, SyncResult
 from wklabs.lib.timeutil import utcnow
@@ -37,6 +39,8 @@ class AppContext:
     topics: TopicManager
     notifier: Notifier
     bot: Bot | None = None
+    sessions: SessionRepo = field(default=None)  # type: ignore[assignment]
+    reports: ReportRepo = field(default=None)  # type: ignore[assignment]
     bot_username: str = ""
     sync_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     last_result: SyncResult | None = None
@@ -45,6 +49,12 @@ class AppContext:
     started_at: datetime = field(default_factory=utcnow)
     # (chat_id, user_id) → (is chat admin, monotonic time); one get_chat_member per minute
     admin_cache: dict[tuple[int, int], tuple[bool, float]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.sessions is None:
+            self.sessions = self.notifier.sessions
+        if self.reports is None:
+            self.reports = self.notifier.reports
 
     def is_admin(self, tg_id: int | None) -> bool:
         return tg_id is not None and tg_id in self.settings.tg_admin_ids
@@ -72,6 +82,12 @@ class AppContext:
                     log.info("delivered %d digest message(s)", sent)
             except Exception:
                 log.exception("notify failed")
+            try:
+                sent = await self.notifier.notify_sessions(accounts=accounts)
+                if sent:
+                    log.info("posted/edited %d session message(s)", sent)
+            except Exception:
+                log.exception("session pass failed")
             await self._alerts(res)
             return res
 

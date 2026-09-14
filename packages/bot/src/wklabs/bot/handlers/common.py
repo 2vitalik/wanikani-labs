@@ -18,7 +18,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from wklabs.lib.accounts import PURGED, Account
 from wklabs.lib.chats import PRIVATE, VIA_VERIFIED, Chat
 from wklabs.lib.delivery import Route
-from wklabs.lib.route_settings import effective, for_category
+from wklabs.lib.notify_settings import effective, for_kind
 from wklabs.lib.timeutil import utcnow
 from wklabs.lib.users import TgUser
 
@@ -32,6 +32,7 @@ from ..keyboards import (
     kb_chat_card,
     kb_chats,
     kb_route,
+    kb_route_more,
     kb_welcome,
 )
 
@@ -173,8 +174,8 @@ async def chat_card_screen(
     mine = await ctx.accounts.for_owner(user.id)
     keys = {a.key for a in mine}
     has_routes = any(r.account in keys for r, _ in rows)
-    subj = next((r for r, _ in rows if r.account is None and r.category == "subjects"), None)
-    sys_ = next((r for r, _ in rows if r.account is None and r.category == "system"), None)
+    subj = next((r for r, _ in rows if r.account is None and r.kind == "subjects"), None)
+    sys_ = next((r for r, _ in rows if r.account is None and r.kind == "system"), None)
     return texts.chat_card(chat, rows, viewer=user.id, note=note), kb_chat_card(
         chat,
         has_accounts=bool(mine),
@@ -278,7 +279,7 @@ async def route_screen(
         label = acc.label if acc else route.account
     perm = await can_edit(ctx, user, route, bot=bot)
     opts = effective(route)
-    settings = [(s, opts[s.key]) for s in for_category(route.category)]
+    settings = [(s, opts[s.key]) for s in for_kind(route.kind, level=1)]
     text = texts.route_card(route, chat, label, note=note, view_only=not perm.any)
     kb = kb_route(
         route,
@@ -288,5 +289,22 @@ async def route_screen(
         can_target=perm.target,
         back_text=back_text,
         back_cb=back_cb,
+        has_more=bool(for_kind(route.kind, level=2)),
     )
     return text, kb
+
+
+async def route_more_screen(
+    ctx: AppContext, route: Route, *, note: str | None = None
+) -> tuple[str, InlineKeyboardMarkup]:
+    """`⚙️ More…` (L2): blocks and map options of the notification."""
+    label = None
+    if route.account:
+        acc = await ctx.accounts.get(route.account)
+        label = acc.label if acc else route.account
+    opts = effective(route)
+    settings = [(s, opts[s.key]) for s in for_kind(route.kind, level=2)]
+    text = texts.route_more(route, label)
+    if note:
+        text = f"{note}\n{text}"
+    return text, kb_route_more(route, settings)
