@@ -1,4 +1,4 @@
-"""`wklabs` — data operations: sync, status, accounts, import-files, import-raw, rebuild-events."""
+"""`wklabs` — data ops: sync, status, accounts, sessions, imports, rebuild-events."""
 
 from __future__ import annotations
 
@@ -339,6 +339,74 @@ def rebuild_events(yes: bool = typer.Option(False, "--yes", "-y")) -> None:
 
     async def go(db: Db) -> None:
         typer.echo(await _rebuild(db))
+
+    _run(go)
+
+
+# ------------------------------------------------------------------- sessions
+_BUCKETS: tuple[tuple[str, float], ...] = (
+    ("< 10 s", 10),
+    ("10–30 s", 30),
+    ("30–60 s", 60),
+    ("1–2 min", 120),
+    ("2–3 min", 180),
+    ("3–5 min", 300),
+    ("5–7 min", 420),
+    ("7–10 min", 600),
+    ("10–15 min", 900),
+    ("15–20 min", 1200),
+    ("20–30 min", 1800),
+    ("30–45 min", 2700),
+    ("45–60 min", 3600),
+    ("1–2 h", 7200),
+    ("2–12 h", 43200),
+    ("> 12 h", float("inf")),
+)
+
+
+@app.command()
+def sessions(
+    account: list[str] = typer.Option([], "--account", "-a", help="Limit to account key(s)."),
+    gap: int = typer.Option(15, "--gap", "-g", help="Minutes of silence that end a session."),
+    histogram: bool = typer.Option(False, "--histogram", help="Pause histogram between instants."),
+    rebuild: bool = typer.Option(False, "--rebuild", help="Rebuild the `sessions` collection."),
+    last: int = typer.Option(10, "--last", "-n", help="Show the last N sessions."),
+) -> None:
+    """Study sessions from events (T31/T32): list, histogram of pauses, rebuild with a gap."""
+    from datetime import timedelta
+    from itertools import pairwise
+
+    from wklabs.lib.sessions import SessionRepo, split_sessions
+
+    async def go(db: Db) -> None:
+        repo = SessionRepo(db)
+        accs = [a.key for a in await AccountRepo(db).list(status=None)]
+        for key in account or accs:
+            instants = await repo.instants(key)
+            typer.echo(f"[{key}] {len(instants)} instants (reviews + lessons)")
+            if not instants:
+                continue
+            if histogram:
+                pauses = [(b - a).total_seconds() for a, b in pairwise(instants)]
+                lo = 0.0
+                for label, hi in _BUCKETS:
+                    n = sum(1 for p in pauses if lo <= p < hi)
+                    typer.echo(f"  {label:<10} {n:>7}  {100 * n / max(len(pauses), 1):5.1f}%")
+                    lo = hi
+            parts = split_sessions(instants, timedelta(minutes=gap))
+            durations = sorted((e - s).total_seconds() / 60 for s, e, _ in parts)
+            med = durations[len(durations) // 2] if durations else 0
+            typer.echo(
+                f"  gap {gap} min → {len(parts)} sessions · median {med:.1f} min · "
+                f"single-instant {sum(1 for _s, _e, n in parts if n == 1)}"
+            )
+            for s, e, n in parts[-last:]:
+                typer.echo(
+                    f"  {s:%Y-%m-%d %H:%M} → {e:%H:%M}  {int((e - s).total_seconds() // 60):>3} min"
+                    f"  {n:>3} instants"
+                )
+            if rebuild:
+                typer.echo(f"  rebuilt: {await repo.rebuild(key, gap)}")
 
     _run(go)
 
