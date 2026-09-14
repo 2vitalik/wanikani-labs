@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from typing import cast
 from zoneinfo import ZoneInfo
 
+import pytest
 from aiogram import Bot
 from bson import ObjectId
 
@@ -52,6 +53,19 @@ SUBJECTS = {
 
 def m(minutes: float) -> datetime:
     return T0 + timedelta(minutes=minutes)
+
+
+NOW = m(180)  # frozen "now": inside the 24 h lookback, before assignment 2 is due
+
+
+@pytest.fixture(autouse=True)
+def _freeze_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    for target in (
+        "wklabs.lib.sessions.utcnow",
+        "wklabs.bot.notifier.utcnow",
+        "wklabs.bot.handlers.progress.utcnow",
+    ):
+        monkeypatch.setattr(target, lambda: NOW)
 
 
 def ev(kind: str, sid: int | None, at: datetime, key: str = "07fff792", **meta) -> dict:
