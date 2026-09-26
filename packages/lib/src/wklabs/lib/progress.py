@@ -20,7 +20,7 @@ SubjectIndex = dict[int, tuple[int, str]]  # subject id → (level, type)
 
 GROUPS: tuple[tuple[str, str], ...] = (
     ("locked", "🔒"),
-    ("lesson", "📖"),
+    ("lesson", "🤍"),  # unlocked, lesson not taken yet: an "empty" heart
     ("apprentice", "🩷"),
     ("guru", "💜"),
     ("master", "💙"),
@@ -33,9 +33,10 @@ TYPES = ("radical", "kanji", "vocabulary", "kana_vocabulary")
 
 # /progress and map-block options (values cycle in this order); T33 §3.2
 LEVELS_CHOICES: tuple[tuple[str, str], ...] = (
-    ("around3", "current -3"),
-    ("around5", "current -5"),
-    ("around10", "current -10"),
+    ("around3", "now-3"),
+    ("around5", "now-5"),
+    ("around10", "now-10"),
+    ("to_current", "1…now"),
     ("all", "all"),
 )
 STYLE_CHOICES: tuple[tuple[str, str], ...] = (
@@ -43,7 +44,7 @@ STYLE_CHOICES: tuple[tuple[str, str], ...] = (
     ("counts", "counts"),
     ("both", "both"),
 )
-SORT_CHOICES: tuple[tuple[str, str], ...] = (("asc", "↑ asc"), ("desc", "↓ desc"))
+SORT_CHOICES: tuple[tuple[str, str], ...] = (("asc", "↑"), ("desc", "↓"))
 FILTER_CHOICES: tuple[tuple[str, str], ...] = (
     ("all", "all"),
     ("apprentice", "apprentice"),
@@ -186,6 +187,8 @@ def pick_levels(all_levels: list[int], current: int | None, choice: str) -> list
         return []
     if choice == "all" or current is None:
         return list(all_levels)
+    if choice == "to_current":
+        return [lvl for lvl in all_levels if lvl <= current]
     n = {"around3": 3, "around5": 5, "around10": 10}.get(choice, 5)
     lo = max(min(all_levels), current - n)
     return [lvl for lvl in all_levels if lo <= lvl <= current]

@@ -8,8 +8,18 @@ from .db import Db
 
 Json = dict[str, Any]
 
-TYPE_EMOJI = {"radical": "🔵", "kanji": "🩷", "vocabulary": "🟣", "kana_vocabulary": "🟪"}
+# WaniKani colours as circles (kanji is pink there, 🔴 is the closest); hearts mean SRS stages
+TYPE_EMOJI = {"radical": "🔵", "kanji": "🔴", "vocabulary": "🟣", "kana_vocabulary": "🟪"}
 TYPE_SHORT = {"radical": "R", "kanji": "K", "vocabulary": "V", "kana_vocabulary": "KV"}
+
+
+def type_mark(subject_type: str | None) -> str:
+    return TYPE_EMOJI.get(str(subject_type or ""), "▫️")
+
+
+def level_tag(level: int | None) -> str:
+    """`L01` … `L60` — always two digits so a column of levels lines up."""
+    return f"L{int(level):02d}" if level is not None else "L??"
 
 
 async def load_subjects(db: Db, ids: set[int]) -> dict[int, Json]:
@@ -45,13 +55,12 @@ def primary_reading(subject: Json | None) -> str:
 def subject_label(
     subject: Json | None, subject_id: int | None = None, subject_type: str | None = None
 ) -> str:
-    """`漢 (kanji L12) · Chinese` — characters (or slug), type, level, meaning."""
+    """`漢 · Chinese` — characters (or slug) and primary meaning; type/level are the caller's."""
     if not subject:
         return f"#{subject_id} ({subject_type or '?'})"
-    chars = subject.get("characters") or subject.get("slug") or f"#{subject.get('_id')}"
-    typ = str(subject.get("type") or subject_type or "?")
+    chars = str(subject.get("characters") or subject.get("slug") or f"#{subject.get('_id')}")
     meaning = primary_meaning(subject)
-    return f"{chars} · {meaning} ({TYPE_SHORT.get(typ, typ)}{subject.get('level', '?')})"
+    return f"{chars} · {meaning}" if meaning else chars
 
 
 def subject_url(subject: Json | None) -> str | None:

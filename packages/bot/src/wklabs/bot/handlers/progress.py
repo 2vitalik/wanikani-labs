@@ -167,7 +167,9 @@ async def cb_progress(
     opts = user_opts(fresh, acc.key)
     opt = callback_data.opt
     if opt in PROGRESS_OPTIONS:
-        opts[opt] = next_option(opt, opts[opt])
+        values = [v for v, _ in PROGRESS_OPTIONS[opt]]
+        picked = callback_data.arg if callback_data.arg in values else next_option(opt, opts[opt])
+        opts[opt] = picked
         await ctx.users.set_pref(user.id, f"progress.{acc.key}.{opt}", opts[opt])
     elif opt == "acc":
         await ctx.users.set_pref(user.id, "progress_last", acc.key)

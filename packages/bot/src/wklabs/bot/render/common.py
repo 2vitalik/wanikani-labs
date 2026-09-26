@@ -1,4 +1,4 @@
-"""Shared pieces of every renderer: HTML helpers, emoji palette, chunking (Telegram limits)."""
+"""Shared pieces of every renderer: HTML helpers, stage/type tokens, chunking (Telegram limits)."""
 
 from __future__ import annotations
 
@@ -7,35 +7,45 @@ from html import escape
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from wklabs.lib.resources import SRS_STAGES
-from wklabs.lib.subjects import subject_label, subject_url
+from wklabs.lib.subjects import level_tag, subject_label, subject_url, type_mark
 
 Json = dict[str, Any]
 
 MAX_LEN = 3900  # Telegram hard limit is 4096
 MAX_LINES = 60  # per message before "… +N more"
 
-STAGE_EMOJI = {
-    0: "🔒",
-    1: "🩷",
-    2: "🩷",
-    3: "🩷",
-    4: "🩷",
-    5: "💜",
-    6: "💜",
-    7: "💙",
-    8: "🩵",
-    9: "🔥",
+# SRS stage as emoji + one cell: inside <code> a column of these lines up (T38)
+STAGE_TOKEN = {
+    0: "🔒 ",
+    1: "🩷1",
+    2: "🩷2",
+    3: "🩷3",
+    4: "🩷4",
+    5: "💜1",
+    6: "💜2",
+    7: "💙 ",
+    8: "🩵 ",
+    9: "🔥 ",
 }
-STAGE_SHORT = {0: "L", 1: "A1", 2: "A2", 3: "A3", 4: "A4", 5: "G1", 6: "G2", 7: "M", 8: "E", 9: "B"}
 
 
-def stage_name(n: int | None) -> str:
-    return SRS_STAGES.get(int(n), str(n)) if n is not None else "?"
+def stage_token(n: int | None) -> str:
+    return STAGE_TOKEN.get(int(n), f"?{n}") if n is not None else " ? "
 
 
-def stage_short(n: int | None) -> str:
-    return STAGE_SHORT.get(int(n), str(n)) if n is not None else "?"
+def move_token(frm: int | None, to: int | None) -> str:
+    """`🩷3→🩷4` in monospace — the fixed-width status that opens an item line."""
+    return f"<code>{stage_token(frm)}→{stage_token(to)}</code>"
+
+
+def miss_detail(meaning_wrong: int, reading_wrong: int) -> str:
+    """` (m1 r2)` with zero parts dropped."""
+    parts = [
+        f"m{meaning_wrong}" if meaning_wrong else "",
+        f"r{reading_wrong}" if reading_wrong else "",
+    ]
+    parts = [p for p in parts if p]
+    return f" ({' '.join(parts)})" if parts else ""
 
 
 def link(subject: Json | None, label: str) -> str:
@@ -44,13 +54,46 @@ def link(subject: Json | None, label: str) -> str:
     return f'<a href="{escape(url)}">{text}</a>' if url else text
 
 
-def subject_ref(sid: int | None, subject_type: str | None, subjects: dict[int, Json]) -> str:
+def subject_ref(
+    sid: int | None, subject_type: str | None, subjects: dict[int, Json], *, level: bool = True
+) -> str:
+    """`🔴 L12 <a>漢 · Chinese</a>` — type mark and level outside the link; `level=False` for
+    inline comma lists."""
     subj = subjects.get(int(sid)) if sid is not None else None
-    return link(subj, subject_label(subj, sid, subject_type))
+    typ = (subj or {}).get("type") or subject_type
+    head = type_mark(typ)
+    if level:
+        head += f" {level_tag((subj or {}).get('level'))}"
+    return f"{head} {link(subj, subject_label(subj, sid, subject_type))}"
 
 
-def subject_of(ev: Json, subjects: dict[int, Json]) -> str:
-    return subject_ref(ev.get("subject_id"), ev.get("subject_type"), subjects)
+def subject_of(ev: Json, subjects: dict[int, Json], *, level: bool = True) -> str:
+    return subject_ref(ev.get("subject_id"), ev.get("subject_type"), subjects, level=level)
+
+
+def grouped(rows: list[tuple[str, str]]) -> list[str]:
+    """Rows are (token, line), already sorted by token. A run of the same token collapses under
+    one header `token · n`; a lone row keeps its token inline (T38 §1)."""
+    out: list[str] = []
+    i = 0
+    while i < len(rows):
+        token = rows[i][0]
+        j = i
+        while j < len(rows) and rows[j][0] == token:
+            j += 1
+        run = rows[i:j]
+        if len(run) == 1:
+            out.append(f"{token} {run[0][1]}")
+        else:
+            out.append(f"{token} · {len(run)}")
+            out.extend(line for _, line in run)
+        i = j
+    return out
+
+
+def tg_len(text: str) -> int:
+    """Telegram counts UTF-16 units: every astral character (emoji) is two."""
+    return len(text) + sum(1 for ch in text if ord(ch) > 0xFFFF)
 
 
 def when(at: datetime, tz: ZoneInfo) -> str:

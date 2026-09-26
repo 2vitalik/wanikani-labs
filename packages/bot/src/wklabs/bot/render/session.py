@@ -18,12 +18,13 @@ from wklabs.lib.stats import Item, Stats
 
 from .common import (
     MAX_LEN,
-    STAGE_EMOJI,
+    grouped,
     minutes,
+    miss_detail,
+    move_token,
     pct,
     quote,
     span,
-    stage_short,
     subject_ref,
     when,
 )
@@ -57,18 +58,44 @@ class SessionView:
 
 
 def item_line(it: Item, subjects: dict[int, Json]) -> str:
+    """`🔴 L12 <a>漢 · Chinese</a> (m1)`; the status token comes from `item_token`."""
     s = subject_ref(it.subject_id, it.subject_type, subjects)
-    if it.moved:
-        to = it.to_stage if it.to_stage is not None else 0
-        s += f" · {stage_short(it.from_stage)} → {STAGE_EMOJI.get(int(to), '')}{stage_short(to)}"
     if it.count and not it.correct:
-        s += f" (m{it.meaning_wrong} r{it.reading_wrong})"
+        s += miss_detail(it.meaning_wrong, it.reading_wrong)
     return s
+
+
+def item_token(it: Item) -> str:
+    if it.moved:
+        return move_token(it.from_stage, it.to_stage)
+    if it.count and not it.correct:
+        return move_token(
+            1, 1
+        )  # a miss at Apprentice 1 stays there — the only review without a move
+    return "✅" if it.count else "•"
+
+
+def _stage_key(it: Item) -> tuple[int, int, int, int]:
+    """Highest stages first, then level and id."""
+    frm = it.from_stage if it.from_stage is not None else -1
+    to = it.to_stage if it.to_stage is not None else -1
+    return (-frm, -to, it.level or 0, it.subject_id)
+
+
+def item_lines(items: list[Item], subjects: dict[int, Json]) -> list[str]:
+    """Items grouped by their SRS move: `🩷3→🩷4 · 3` + list, or inline when alone (T38 §1)."""
+    ordered = sorted(items, key=_stage_key)
+    return grouped([(item_token(it), item_line(it, subjects)) for it in ordered])
 
 
 def _refs(ids: list[int], subjects: dict[int, Json], stats: Stats, limit: int = 30) -> str:
     out = ", ".join(
-        subject_ref(sid, stats.items[sid].subject_type if sid in stats.items else None, subjects)
+        subject_ref(
+            sid,
+            stats.items[sid].subject_type if sid in stats.items else None,
+            subjects,
+            level=False,
+        )
         for sid in ids[:limit]
     )
     return out + (f" … +{len(ids) - limit}" if len(ids) > limit else "")
@@ -116,9 +143,7 @@ def block_wrong(view: SessionView, opts: Json) -> str | None:
     wrong = view.stats.wrong_items
     if items == "none" or not wrong:
         return None
-    return quote(
-        f"❌ wrong ({len(wrong)})", [item_line(it, view.subjects) for it in wrong[:MAX_ITEMS]]
-    )
+    return quote(f"❌ wrong ({len(wrong)})", item_lines(wrong[:MAX_ITEMS], view.subjects))
 
 
 def block_all(view: SessionView, opts: Json) -> str | None:
@@ -127,8 +152,8 @@ def block_all(view: SessionView, opts: Json) -> str | None:
     ok = [it for it in view.stats.items.values() if it.count and it.correct]
     if not ok:
         return None
-    ok.sort(key=lambda it: (it.level or 0, it.subject_id))
-    return quote(f"✅ correct ({len(ok)})", [item_line(it, view.subjects) for it in ok[:MAX_ITEMS]])
+    ok.sort(key=_stage_key)
+    return quote(f"✅ correct ({len(ok)})", item_lines(ok[:MAX_ITEMS], view.subjects))
 
 
 def block_wins(view: SessionView, opts: Json) -> str | None:

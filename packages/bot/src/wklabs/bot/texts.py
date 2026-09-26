@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from html import escape
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from wklabs.lib.accounts import AUTH_ERROR, KEY_ERROR, Account, WkIdentity
@@ -32,18 +33,29 @@ from wklabs.lib.delivery import (
     kind_title,
 )
 from wklabs.lib.notify_settings import help_line
+from wklabs.lib.subjects import level_tag
 from wklabs.lib.sync import SyncResult
 from wklabs.lib.users import PENDING, TgUser
 
 TOKEN_URL = "https://www.wanikani.com/settings/personal_access_tokens"
 
 
-def _dt(dt: datetime | None, tz: ZoneInfo, fmt: str = "%d.%m %H:%M") -> str:
-    return dt.astimezone(tz).strftime(fmt) if dt else "—"
+def _dt(dt: datetime | None, tz: ZoneInfo, fmt: str | None = "%d.%m %H:%M") -> str:
+    return dt.astimezone(tz).strftime(fmt or "%d.%m %H:%M") if dt else "—"
 
 
 def e(s: object) -> str:
     return escape(str(s))
+
+
+def chat_icon(chat: Chat) -> str:
+    if not chat.present:
+        return "⚠️"
+    if chat.is_private:
+        return "🔒"
+    if chat.is_channel:
+        return "📢"
+    return "🗂" if chat.is_forum else "👥"
 
 
 # ------------------------------------------------------------------ start
@@ -116,10 +128,23 @@ def account_card(
     last_sync: datetime | None,
     tz: ZoneInfo,
     now: datetime,
+    summary: dict[str, Any] | None = None,
 ) -> str:
-    lines = [f"{acc.emoji} <b>{e(acc.label)}</b>   <code>{acc.key}</code>"]
-    wk = f"WaniKani: {e(acc.username)} · level {acc.level or '?'}"
-    lines.append(wk)
+    lines = [
+        f"{acc.emoji} <b>{e(acc.label)}</b> · {e(acc.username)} · <b>{level_tag(acc.level)}</b>"
+        f"   <code>{acc.key}</code>"
+    ]
+    if summary:
+        parts = [
+            f"⏳ <b>{summary.get('reviews_now') or 0}</b> due",
+            f"📖 {summary.get('lessons_now') or 0} lessons",
+        ]
+        nxt = summary.get("next_reviews_at")
+        if isinstance(nxt, datetime) and nxt > now:
+            parts.append(
+                f"next {_dt(nxt, tz, '%H:%M' if nxt - now < timedelta(hours=20) else None)}"
+            )
+        lines.append(" · ".join(parts))
     if acc.status in (AUTH_ERROR, KEY_ERROR):
         lines.append(
             f"⚠️ token rejected ({e(acc.status_reason or acc.status)}) on "
@@ -128,17 +153,19 @@ def account_card(
     else:
         ago = f" ({int((now - last_sync).total_seconds() // 60)} min ago)" if last_sync else ""
         lines.append(
-            f"token …{e(acc.token_hint)} · added {_dt(acc.created_at, tz, '%Y-%m-%d')} · "
-            f"last sync {_dt(last_sync, tz)}{ago}"
+            f"🔑 …{e(acc.token_hint)} · added {_dt(acc.created_at, tz, '%Y-%m-%d')} · "
+            f"synced {_dt(last_sync, tz)}{ago}"
         )
         if acc.status == "paused":
             lines.append("⏸ paused — not polling")
+    lines.append("")
     if routes:
+        lines.append("📬 <b>Notifications</b>")
         for r, chat in routes:
-            where = e(chat.name) + (f" › {e(r.thread_title)}" if r.thread_title else "")
+            where = f"{chat_icon(chat)} {_where(r, chat)}" + ("" if r.enabled else " · off")
             lines.append(f"{r.icon} {r.title} → {where}")
     else:
-        lines.append("no notifications — 📬 Notifications")
+        lines.append("📬 no notifications yet — tap 📬 Notifications to add one")
     return "\n".join(lines)
 
 
@@ -503,6 +530,22 @@ def setup_light(chat: Chat, *, accounts: int) -> str:
     elif chat.can_post:
         lines.append("Deliver your digests here with one tap, or configure in detail.")
     return "\n".join(lines)
+
+
+def setup_private() -> str:
+    return (
+        "🛠 /setup works inside a group or forum: add me there and send /setup in that chat — "
+        "I register it and offer one-tap presets.\n"
+        "From here, ➕ Add a chat picks a chat from your list and Telegram adds me with the "
+        "rights I need."
+    )
+
+
+def pick_failed(reason: str) -> str:
+    return (
+        f"⚠️ Telegram refused the chat picker: {e(reason)}\n"
+        "Add me to the chat by hand (admin, plus Manage Topics for a forum) and send /setup there."
+    )
 
 
 def pick_chat() -> str:

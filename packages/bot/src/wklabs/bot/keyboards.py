@@ -24,7 +24,7 @@ from wklabs.lib.delivery import (
     Route,
 )
 from wklabs.lib.notify_settings import Setting
-from wklabs.lib.progress import PROGRESS_OPTIONS, option_label
+from wklabs.lib.progress import LEVELS_CHOICES, PROGRESS_OPTIONS, option_label
 from wklabs.lib.users import ACTIVE as U_ACTIVE
 from wklabs.lib.users import BLOCKED, PENDING, TgUser
 
@@ -39,6 +39,7 @@ from .callbacks import (
     TargetCb,
     TopicCb,
 )
+from .texts import chat_icon
 
 PICK_CANCEL = "✖️ Cancel"
 # request_chat ids: which button was pressed (comes back in `chat_shared.request_id`)
@@ -47,16 +48,6 @@ PICK_ADMIN, PICK_MEMBER, PICK_CHANNEL = 1, 2, 3
 
 def _on(flag: bool) -> str:
     return "✅" if flag else "🚫"
-
-
-def chat_icon(chat: Chat) -> str:
-    if not chat.present:
-        return "⚠️"
-    if chat.is_private:
-        return "🔒"
-    if chat.is_channel:
-        return "📢"
-    return "🗂" if chat.is_forum else "👥"
 
 
 def kb_accounts(accounts: list[Account], due: dict[str, int]) -> InlineKeyboardMarkup:
@@ -95,6 +86,14 @@ def kb_back_accounts() -> InlineKeyboardMarkup:
 def kb_back_chats() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="💬 Chats", callback_data=NavCb(screen="chats"))
+    return b.as_markup()
+
+
+def kb_setup_private() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="➕ Add a chat", callback_data=NavCb(screen="addchat"))
+    b.button(text="💬 Chats", callback_data=NavCb(screen="chats"))
+    b.adjust(2)
     return b.as_markup()
 
 
@@ -262,24 +261,24 @@ def kb_session(session_id: ObjectId, *, live: bool) -> InlineKeyboardMarkup:
 def kb_progress(
     key: str, opts: dict[str, str], *, accounts: list[Account], in_group: bool
 ) -> InlineKeyboardMarkup:
-    """`/progress`: every option is a cycling button; the message re-renders in place."""
+    """`/progress`: levels as one radio row (any range in one tap), the rest cycle; the message
+    re-renders in place."""
     b = InlineKeyboardBuilder()
-    for opt in ("levels", "sort", "group"):
+    for value, label in LEVELS_CHOICES:
+        mark = "• " if opts["levels"] == value else ""
+        b.button(text=f"{mark}{label}", callback_data=ProgressCb(key=key, opt="levels", arg=value))
+    for opt in ("sort", "group", "filter", "style", "diff"):
+        word = "Δ" if opt == "diff" else opt
         b.button(
-            text=f"{opt}: {option_label(opt, opts[opt])}",
+            text=f"{word}: {option_label(opt, opts[opt])}",
             callback_data=ProgressCb(key=key, opt=opt),
         )
-    for opt in ("filter", "style", "diff"):
-        b.button(
-            text=f"{opt}: {option_label(opt, opts[opt])}",
-            callback_data=ProgressCb(key=key, opt=opt),
-        )
-    b.adjust(3, 3)
+    b.button(text="🔄", callback_data=ProgressCb(key=key, opt="refresh"))
+    b.adjust(len(LEVELS_CHOICES), 3, 3)
     tail = InlineKeyboardBuilder()
     for a in accounts:
         if a.key != key:
             tail.button(text=f"👤 {a.label}", callback_data=ProgressCb(key=a.key, opt="acc"))
-    tail.button(text="🔄", callback_data=ProgressCb(key=key, opt="refresh"))
     if in_group:
         tail.button(text="🧹 Close", callback_data=ProgressCb(key=key, opt="close"))
     tail.adjust(3)

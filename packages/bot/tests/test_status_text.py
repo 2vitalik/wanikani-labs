@@ -27,4 +27,6 @@ async def test_status_text_lists_accounts(db):
     assert "no accounts yet" in text and "db:" not in text
     acc = await ctx.accounts.create(ident(), "tok", owner_tg_id=42, source="test")
     text = await status_text(ctx, [acc], admin=True)
-    assert "🟢 <b>Vitalik</b>" in text and "db: subjects" in text
+    assert "🟢 <b>Vitalik</b> · None · <b>L??</b>" in text and "db: subjects" in text
+    assert "⏳ <b>—</b> due · 📖 0 lessons · next — · 24h 0 reviews" in text
+    assert text.endswith("</i>") and "poll every" in text

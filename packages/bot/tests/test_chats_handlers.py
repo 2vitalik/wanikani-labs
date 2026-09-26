@@ -4,9 +4,9 @@ from datetime import UTC, datetime
 from typing import cast
 
 from aiogram import Bot
-from aiogram.types import ChatMemberUpdated, Message
+from aiogram.types import CallbackQuery, ChatMemberUpdated, InlineKeyboardMarkup, Message
 
-from wklabs.bot.handlers.chats import msg_chat_shared
+from wklabs.bot.handlers.chats import cb_addchat, msg_chat_shared
 from wklabs.bot.handlers.common import chat_card_screen, chats_screen, visible_chat
 from wklabs.bot.handlers.membership import (
     on_migrate_to,
@@ -14,12 +14,22 @@ from wklabs.bot.handlers.membership import (
     on_topic_closed,
     on_topic_edited,
 )
-from wklabs.bot.handlers.setup import cmd_setup
+from wklabs.bot.handlers.setup import cmd_setup, cmd_setup_private
 from wklabs.bot.middleware import thread_of
 from wklabs.lib.chats import ADMIN, KICKED, LEFT, VIA_PICKED
 from wklabs.lib.users import TgUser
 
-from .helpers import BOT_ID, FakeBot, chat_info, ident, make_ctx, me_admin, me_left, me_member
+from .helpers import (
+    BOT_ID,
+    FakeBot,
+    bad_request,
+    chat_info,
+    ident,
+    make_ctx,
+    me_admin,
+    me_left,
+    me_member,
+)
 
 NOW = datetime(2026, 9, 12, 10, 0, tzinfo=UTC)
 
@@ -198,3 +208,50 @@ async def test_migration_and_topic_events(db):
     chat = await ctx.chats.get(-100)
     assert chat and chat.topics[9].name == "Chat"
     assert me_left().status == "left"
+
+
+async def test_setup_in_private_points_to_the_picker():
+    msg = message(42).model_copy(update={"chat": {"id": 42, "type": "private", "first_name": "V"}})
+    sink = Sink()
+    object.__setattr__(msg, "answer", sink)
+    await cmd_setup_private(msg)
+    text, kb = sink.out[0]
+    kb = cast(InlineKeyboardMarkup, kb)
+    assert "/setup works inside a group or forum" in text
+    assert [b.text for row in kb.inline_keyboard for b in row] == ["➕ Add a chat", "💬 Chats"]
+
+
+async def test_addchat_picker_refused_is_visible():
+    cb = CallbackQuery.model_validate(
+        {
+            "id": "1",
+            "from": {"id": 42, "is_bot": False, "first_name": "V"},
+            "chat_instance": "x",
+            "data": "nav:addchat",
+            "message": {
+                "message_id": 5,
+                "date": 1,
+                "chat": {"id": 42, "type": "private", "first_name": "V"},
+                "text": "chats",
+            },
+        }
+    )
+
+    class Flaky(Sink):
+        async def __call__(self, text: str, reply_markup=None, **kw) -> None:
+            if not self.out:  # the picker itself is refused; the fallback message goes through
+                self.out.append(("refused", None))
+                raise bad_request(42, "BUTTON_TYPE_INVALID")
+            await super().__call__(text, reply_markup, **kw)
+
+    sink = Flaky()
+    object.__setattr__(cb.message, "answer", sink)
+    answered: list[object] = []
+
+    async def answer(text: object = None, **kw) -> None:
+        answered.append(text)
+
+    object.__setattr__(cb, "answer", answer)
+    await cb_addchat(cb)
+    assert "BUTTON_TYPE_INVALID" in sink.out[-1][0] and "/setup there" in sink.out[-1][0]
+    assert answered == [None]  # the button stops spinning

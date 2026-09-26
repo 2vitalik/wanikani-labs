@@ -7,7 +7,9 @@ from html import escape
 from zoneinfo import ZoneInfo
 
 from wklabs.lib.accounts import Account
+from wklabs.lib.progress import GROUP_EMOJI
 from wklabs.lib.status import account_status, stage_buckets, sync_status
+from wklabs.lib.subjects import level_tag
 from wklabs.lib.timeutil import utcnow
 
 from .context import AppContext
@@ -17,35 +19,53 @@ def _fmt_dt(dt: datetime | None, tz: ZoneInfo) -> str:
     return dt.astimezone(tz).strftime("%d.%m %H:%M") if dt else "—"
 
 
-async def _account_block(ctx: AppContext, acc: Account, tz: ZoneInfo) -> list[str]:
+def _soon(dt: datetime | None, tz: ZoneInfo, now: datetime) -> str:
+    """`13:00` today, `28.09 09:00` further away, `now` when already due."""
+    if dt is None:
+        return "—"
+    if dt <= now:
+        return "now"
+    fmt = "%H:%M" if dt - now < timedelta(hours=20) else "%d.%m %H:%M"
+    return dt.astimezone(tz).strftime(fmt)
+
+
+def _stage_line(stages: dict[int, int]) -> str:
+    b = stage_buckets(stages)
+    parts = [f"{GROUP_EMOJI[k.lower()]} {v}" for k, v in b.items() if v]
+    return " · ".join(parts) if parts else "no assignments yet"
+
+
+async def _account_block(ctx: AppContext, acc: Account, tz: ZoneInfo, now: datetime) -> list[str]:
     a = await account_status(ctx.db, acc.key)
-    b = stage_buckets(a["stages"])
-    return [
+    head = (
         f"{acc.emoji} <b>{escape(acc.label)}</b> · {escape(str(a['username']))} · "
-        f"level {a['level']}" + (f" · <i>{escape(acc.status)}</i>" if not acc.is_active else ""),
-        f"  reviews now <b>{a['reviews_now']}</b> · lessons {a['lessons_now']} · "
-        f"next {_fmt_dt(a['next_reviews_at'], tz)} · 24h reviews {a['reviews_24h']}",
-        "  " + " · ".join(f"{k[:3]} {v}" for k, v in b.items()),
+        f"<b>{level_tag(a['level'])}</b>"
+    )
+    if not acc.is_active:
+        head += f" · <i>{escape(acc.status)}</i>"
+    due = a["reviews_now"]
+    return [
+        head,
+        f"⏳ <b>{due if due is not None else '—'}</b> due · 📖 {a['lessons_now'] or 0} lessons · "
+        f"next {_soon(a['next_reviews_at'], tz, now)} · 24h {a['reviews_24h']} reviews",
+        _stage_line(a["stages"]),
     ]
 
 
 async def status_text(ctx: AppContext, accounts: list[Account], *, admin: bool) -> str:
     tz = ZoneInfo(ctx.settings.tz)
+    now = utcnow()
     s = await sync_status(ctx.db)
     last = s["last_run"]
-    lines = ["<b>wanikani-labs</b>"]
     if last:
-        age = utcnow() - last["started_at"]
-        lines.append(
-            f"last sync: {_fmt_dt(last['started_at'], tz)} "
-            f"({int(age.total_seconds() // 60)} min ago) · {last['kind']} · "
-            f"{'✅' if last['ok'] else '❌'} · events {last.get('events', 0)} · "
-            f"req {last.get('requests', 0)}"
-        )
-        if admin and last.get("errors"):
-            lines.append("❌ " + escape("; ".join(last["errors"][:3])))
+        age = int((now - last["started_at"]).total_seconds() // 60)
+        ok = "✅" if last["ok"] else "❌"
+        sync = f"{ok} synced {_fmt_dt(last['started_at'], tz)} ({age} min ago)"
     else:
-        lines.append("no sync runs yet")
+        sync = "no sync runs yet"
+    lines = [f"<b>wanikani-labs</b> · {sync}"]
+    if admin and last and last.get("errors"):
+        lines.append("❌ " + escape("; ".join(last["errors"][:3])))
     if admin:
         c = s["counts"]
         lines.append(
@@ -57,14 +77,18 @@ async def status_text(ctx: AppContext, accounts: list[Account], *, admin: bool) 
         lines.append("no accounts yet — /accounts to add one")
     for acc in accounts:
         lines.append("")
-        lines.extend(await _account_block(ctx, acc, tz))
-    up = utcnow() - ctx.started_at
+        lines.extend(await _account_block(ctx, acc, tz, now))
+    up = timedelta(seconds=int((now - ctx.started_at).total_seconds()))
+    foot = [f"up {up!s}", f"poll every {ctx.settings.sync_interval}s"]
+    if last:
+        foot.append(
+            f"last run: {last['kind']}, {last.get('events', 0)} events, "
+            f"{last.get('requests', 0)} req"
+        )
+    if ctx.notifier.dry_run:
+        foot.append("dry-run")
     lines.append("")
-    lines.append(
-        f"uptime {timedelta(seconds=int(up.total_seconds()))!s} · "
-        f"poll every {ctx.settings.sync_interval}s"
-        + (" · <i>dry-run</i>" if ctx.notifier.dry_run else "")
-    )
+    lines.append(f"<i>{' · '.join(foot)}</i>")
     return "\n".join(lines)
 
 
@@ -105,7 +129,8 @@ async def heartbeat_text(ctx: AppContext) -> str:
     for acc in await ctx.accounts.list(status=None):
         a = await account_status(ctx.db, acc.key)
         parts.append(
-            f"{acc.emoji} {escape(acc.label)}: L{a['level']} · {a['reviews_24h']} reviews · "
+            f"{acc.emoji} {escape(acc.label)}: {level_tag(a['level'])} · "
+            f"{a['reviews_24h']} reviews · "
             f"{a['reviews_now']} due now"
         )
     return "\n".join(parts)

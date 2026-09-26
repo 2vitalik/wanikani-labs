@@ -1,14 +1,14 @@
 """Pure UI pieces: texts and keyboards."""
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from bson import ObjectId
 
 from wklabs.bot import texts
-from wklabs.bot.callbacks import ChatCb
+from wklabs.bot.callbacks import ChatCb, ProgressCb
 from wklabs.bot.keyboards import (
     kb_account_card,
     kb_accounts,
@@ -74,7 +74,16 @@ def test_account_card_and_keyboards():
     forum = chat()
     route = Route(ObjectId(), "07fff792", "live", -100, 7, "📝 Vitalik · reviews", True, 42, NOW)
     text = texts.account_card(acc(), [(route, forum)], last_sync=NOW, tz=ZoneInfo("UTC"), now=NOW)
-    assert "…ab12" in text and "📝 Live reviews → WK › 📝 Vitalik · reviews" in text
+    assert "…ab12" in text and "📝 Live reviews → 🗂 WK › 📝 Vitalik · reviews" in text
+    assert text.startswith("🟢 <b>Vitalik</b> · Vitalik · <b>L39</b>   <code>07fff792</code>\n")
+    summary = {"reviews_now": 12, "lessons_now": 3, "next_reviews_at": NOW + timedelta(hours=2)}
+    text = texts.account_card(
+        acc(), [], last_sync=NOW, tz=ZoneInfo("UTC"), now=NOW, summary=summary
+    )
+    assert (
+        "\n⏳ <b>12</b> due · 📖 3 lessons · next 12:00\n" in text
+        and "no notifications yet" in text
+    )
     text = texts.account_card(acc("auth_error"), [], last_sync=None, tz=ZoneInfo("UTC"), now=NOW)
     assert "token rejected" in text and "no notifications" in text
     kb = kb_accounts([acc()], {"07fff792": 12})
@@ -153,3 +162,4 @@ def test_chat_keyboards():
 def test_callback_data_fits_telegram_limit():
     longest = ChatCb(chat=-1001234567890123, action="stop_yes", arg="per_category").pack()
     assert len(longest.encode()) <= 64
+    assert len(ProgressCb(key="07fff792", opt="levels", arg="to_current").pack().encode()) <= 64

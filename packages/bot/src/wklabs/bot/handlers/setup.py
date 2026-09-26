@@ -15,7 +15,7 @@ from wklabs.lib.users import TgUser
 from .. import texts
 from ..chat_inspect import inspect_chat
 from ..context import AppContext
-from ..keyboards import kb_setup_light
+from ..keyboards import kb_setup_light, kb_setup_private
 
 log = logging.getLogger(__name__)
 router = Router(name="setup")
@@ -39,3 +39,9 @@ async def cmd_setup(message: Message, ctx: AppContext, user: TgUser, bot: Bot) -
             chat, has_accounts=bool(accounts), bot_username=ctx.bot_username
         ),
     )
+
+
+@router.message(Command("setup"), F.chat.type == ChatType.PRIVATE)
+async def cmd_setup_private(message: Message) -> None:
+    """In private there is nothing to set up — point to the picker and to /setup in the chat."""
+    await message.answer(texts.setup_private(), reply_markup=kb_setup_private())

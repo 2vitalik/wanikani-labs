@@ -7,10 +7,10 @@ from html import escape
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .render.common import STAGE_EMOJI, chunk, stage_name, subject_of, when
+from .render.common import chunk, grouped, miss_detail, move_token, subject_of, when
 
 Json = dict[str, Any]
-_stage, _subject, _when, _chunk = stage_name, subject_of, when, chunk
+_subject, _when, _chunk = subject_of, when, chunk
 
 
 # ---------------------------------------------------------------- reviews
@@ -58,42 +58,48 @@ def render_reviews(
         parts.append(f"🔓 {len(unlocked)} unlocked")
     header = " — ".join(parts)
 
-    lines: list[str] = []
-
-    # worst first: wrong answers, then SRS drops, then the rest
-    def sort_key(item: tuple[int, dict[str, Json]]) -> tuple[int, int]:
-        g = item[1]
-        wrong = 0 if g.get("reviewed", {}).get("meta", {}).get("correct", True) else 1
-        down = 1 if "srs_down" in g else 0
-        return (-(wrong + down), item[0])
-
-    for _sid, g in sorted(by_subject.items(), key=sort_key):
+    # wrong ones first, then by SRS stage (highest first); same-move items collapse into a group
+    rows: list[tuple[tuple[int, int, int, int], str, str]] = []
+    for sid, g in by_subject.items():
         rv = g.get("reviewed")
         mv = g.get("srs_up") or g.get("srs_down")
         ev = rv or mv
         assert ev is not None
-        bad = bool(rv and not rv["meta"].get("correct")) or "srs_down" in g
+        correct = bool(rv["meta"].get("correct")) if rv else None
+        bad = (rv is not None and not correct) or "srs_down" in g
         if items == "none" or (items == "wrong" and not bad):
             continue
-        mark = ("✅" if rv["meta"].get("correct") else "❌") if rv else "•"
-        s = f"{mark} {_subject(ev, subjects)}"
         if mv:
             fs, ts = mv["meta"].get("from_stage"), mv["meta"].get("to_stage")
-            s += f" · {_stage(fs)} → {STAGE_EMOJI.get(int(ts), '')}{_stage(ts)}"
-        if rv and not rv["meta"].get("correct"):
-            mw, rw = rv["meta"].get("meaning_wrong", 0), rv["meta"].get("reading_wrong", 0)
-            s += f" (m{mw} r{rw})"
-        lines.append(s)
+        elif rv and not correct:
+            fs = ts = 1  # a miss at Apprentice 1 stays there
+        else:
+            fs = ts = None
+        token = move_token(fs, ts) if fs is not None else ("✅" if correct else "•")
+        line = _subject(ev, subjects)
+        if rv and not correct:
+            line += miss_detail(
+                rv["meta"].get("meaning_wrong", 0), rv["meta"].get("reading_wrong", 0)
+            )
+        key = (
+            0 if bad else 1,
+            -(fs if fs is not None else -1),
+            -(ts if ts is not None else -1),
+            sid,
+        )
+        rows.append((key, token, line))
+    rows.sort(key=lambda r: r[0])
+    lines = grouped([(token, line) for _, token, line in rows])
     if started and items == "all":
         lines.append(
             "📖 lessons: "
-            + ", ".join(_subject(e, subjects) for e in started[:30])
+            + ", ".join(_subject(e, subjects, level=False) for e in started[:30])
             + (f" … +{len(started) - 30}" if len(started) > 30 else "")
         )
     if unlocked and items == "all":
         lines.append(
             "🔓 unlocked: "
-            + ", ".join(_subject(e, subjects) for e in unlocked[:30])
+            + ", ".join(_subject(e, subjects, level=False) for e in unlocked[:30])
             + (f" … +{len(unlocked) - 30}" if len(unlocked) > 30 else "")
         )
     return _chunk(header, lines)
@@ -132,7 +138,7 @@ def render_milestones(
     ):
         evs = groups.get(kind, [])
         if evs:
-            items = ", ".join(_subject(e, subjects) for e in evs[:40])
+            items = ", ".join(_subject(e, subjects, level=False) for e in evs[:40])
             more = f" … +{len(evs) - 40}" if len(evs) > 40 else ""
             lines.append(f"{label} ({len(evs)}): {items}{more}")
     return _chunk(header, lines)

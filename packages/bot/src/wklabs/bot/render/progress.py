@@ -14,6 +14,9 @@ from wklabs.lib.progress import (
     option_label,
     total_counts,
 )
+from wklabs.lib.subjects import level_tag
+
+from .common import MAX_LEN, tg_len
 
 Json = dict[str, Any]
 BAR_WIDTH = 10
@@ -26,6 +29,7 @@ GROUP_TITLE: dict[str, str] = {
     "enlightened": "Enlightened",
     "burned": "Burned",
 }
+Widths = dict[str, int]
 
 
 def bar(counts: dict[str, int], width: int = BAR_WIDTH) -> str:
@@ -42,8 +46,24 @@ def bar(counts: dict[str, int], width: int = BAR_WIDTH) -> str:
     return "".join(GROUP_EMOJI[g] * cells[g] for g in GROUP_ORDER)
 
 
-def counts_str(counts: dict[str, int]) -> str:
-    return " ".join(f"{GROUP_EMOJI[g]}{counts.get(g, 0)}" for g in GROUP_ORDER)
+def visible_groups(after: Matrix, levels: list[int]) -> list[str]:
+    """Stage groups that exist somewhere in the shown levels — the columns of a counts table."""
+    totals = total_counts(after, levels)
+    return [g for g in GROUP_ORDER if totals.get(g)]
+
+
+def column_widths(after: Matrix, levels: list[int], cols: list[str]) -> Widths:
+    w = dict.fromkeys(cols, 1)
+    for lvl in levels:
+        c = group_counts(after, lvl)
+        for g in cols:
+            w[g] = max(w[g], len(str(c.get(g, 0))))
+    return w
+
+
+def counts_str(counts: dict[str, int], cols: list[str], widths: Widths) -> str:
+    """`🩷 12 💜  3 🔥 40` — numbers right-aligned per column, for <code>."""
+    return " ".join(f"{GROUP_EMOJI[g]}{counts.get(g, 0):>{widths[g]}}" for g in cols)
 
 
 def diff_str(before: dict[str, int], after: dict[str, int]) -> str:
@@ -55,6 +75,12 @@ def diff_str(before: dict[str, int], after: dict[str, int]) -> str:
     return " · ".join(parts)
 
 
+def level_head(level: int, current: int | None) -> str:
+    """`L07`; the current level in bold — same width, nothing shifts (T38 §2)."""
+    tag = level_tag(level)
+    return f"<b>{tag}</b>" if level == current else tag
+
+
 def level_line(
     level: int,
     after: dict[str, int],
@@ -62,19 +88,47 @@ def level_line(
     *,
     style: str,
     current: int | None = None,
-) -> str:
-    mark = "▶︎" if level == current else ""
-    head = f"L{level}{mark}"
-    parts: list[str] = []
-    if style in ("emoji", "both"):
-        parts.append(bar(after))
-    if style in ("counts", "both"):
-        parts.append(f"<code>{counts_str(after)}</code>")
+    cols: list[str],
+    widths: Widths,
+) -> list[str]:
+    """One level: 1 line for `emoji`/`counts`, 2 for `both` (bar, then the counts row)."""
+    head = level_head(level, current)
+    tail = ""
     if before is not None:
         d = diff_str(before, after)
-        if d:
-            parts.append(d)
-    return f"{head} " + " · ".join(parts)
+        tail = f" · {d}" if d else ""
+    if style == "counts":
+        return [f"{head} <code>{counts_str(after, cols, widths)}</code>{tail}"]
+    lines = [f"{head} {bar(after)}{tail}"]
+    if style == "both":
+        lines.append(f"<code>    {counts_str(after, cols, widths)}</code>")
+    return lines
+
+
+def level_rows(
+    after: Matrix,
+    before: Matrix | None,
+    levels: list[int],
+    *,
+    style: str = "emoji",
+    sort: str = "asc",
+    filter_: str = "all",
+    current: int | None = None,
+) -> list[list[str]]:
+    """One row (1–2 lines) per level, in display order."""
+    rows: list[list[str]] = []
+    ordered = sorted(levels, reverse=(sort == "desc"))
+    cols = visible_groups(after, levels)
+    widths = column_widths(after, levels, cols)
+    for lvl in ordered:
+        a = group_counts(after, lvl)
+        b = group_counts(before, lvl) if before is not None else None
+        if filter_ == "apprentice" and not a["apprentice"]:
+            continue
+        if filter_ == "changed" and (b is None or not diff_str(b, a)):
+            continue
+        rows.append(level_line(lvl, a, b, style=style, current=current, cols=cols, widths=widths))
+    return rows
 
 
 def level_lines(
@@ -87,17 +141,13 @@ def level_lines(
     filter_: str = "all",
     current: int | None = None,
 ) -> list[str]:
-    rows: list[str] = []
-    ordered = sorted(levels, reverse=(sort == "desc"))
-    for lvl in ordered:
-        a = group_counts(after, lvl)
-        b = group_counts(before, lvl) if before is not None else None
-        if filter_ == "apprentice" and not a["apprentice"]:
-            continue
-        if filter_ == "changed" and (b is None or not diff_str(b, a)):
-            continue
-        rows.append(level_line(lvl, a, b, style=style, current=current))
-    return rows
+    return [
+        ln
+        for row in level_rows(
+            after, before, levels, style=style, sort=sort, filter_=filter_, current=current
+        )
+        for ln in row
+    ]
 
 
 def stage_lines(after: Matrix, before: Matrix | None, levels: list[int]) -> list[str]:
@@ -118,9 +168,9 @@ def stage_lines(after: Matrix, before: Matrix | None, levels: list[int]) -> list
             a = group_counts(after, lvl).get(g, 0)
             b = group_counts(before, lvl).get(g, 0) if before is not None else a
             if a != b:
-                per.append(f"L{lvl} {b}→{a}")
+                per.append(f"{level_tag(lvl)} {b}→{a}")
             elif a and g in ("apprentice", "lesson"):
-                per.append(f"L{lvl} {a}")
+                per.append(f"{level_tag(lvl)} {a}")
         rows.append(head + (": " + " · ".join(per[:12]) if per else ""))
     return rows
 
@@ -136,7 +186,21 @@ def changed_lines(after: Matrix, before: Matrix, levels: list[int] | None = None
     for lvl in lvls:
         d = diff_str(group_counts(before, lvl), group_counts(after, lvl))
         if d:
-            out.append(f"L{lvl} {d}")
+            out.append(f"{level_tag(lvl)} {d}")
+    return out
+
+
+def fit_rows(rows: list[list[str]], budget: int, *, drop_start: bool) -> list[str]:
+    """Flatten rows into ≤ `budget` Telegram units, dropping whole levels from the far end."""
+    kept = list(rows)
+    dropped = 0
+    while len(kept) > 1 and sum(tg_len(ln) + 1 for row in kept for ln in row) > budget:
+        kept.pop(0) if drop_start else kept.pop()
+        dropped += 1
+    out = [ln for row in kept for ln in row]
+    if dropped:
+        note = f"… +{dropped} levels don't fit — narrow the range or pick another style"
+        out.insert(0, note) if drop_start else out.append(note)
     return out
 
 
@@ -151,20 +215,24 @@ def render_map(
     due: int | None = None,
     diff_title: str = "",
 ) -> str:
-    """The `/progress` message body (one message; the caller keeps it under the limit)."""
+    """The `/progress` message body — one message, trimmed to Telegram's limit."""
     rng = f"levels {min(levels)}–{max(levels)}" if levels else "no levels"
-    arrow = "↓" if opts.get("sort") == "desc" else "↑"
-    head = f"🗺 <b>{escape(label)}</b> · L{current or '?'} · {rng} {arrow}"
+    desc = opts.get("sort") == "desc"
+    arrow = "↓" if desc else "↑"
+    head = f"🗺 <b>{escape(label)}</b> · {level_tag(current)} · {rng} {arrow}"
     if diff_title:
         head += f" · Δ {escape(diff_title)}"
     totals = total_counts(after, levels)
     tot_line = " ".join(f"{GROUP_EMOJI[g]} {totals[g]}" for g in GROUP_ORDER if totals[g])
     if due is not None:
         tot_line += f" · ⏳ due {due}"
+    foot = " · ".join(f"{k}: {option_label(k, opts[k])}" for k in ("filter", "style") if k in opts)
+    frame = [head, tot_line, "", "", f"<i>{foot}</i>"]
+    budget = MAX_LEN - sum(tg_len(x) + 1 for x in frame)
     if opts.get("group") == "stage":
         body = stage_lines(after, before, levels)
     else:
-        body = level_lines(
+        rows = level_rows(
             after,
             before,
             levels,
@@ -173,9 +241,8 @@ def render_map(
             filter_=opts.get("filter", "all"),
             current=current,
         )
+        # the current level sits at the end when ascending: drop far (low) levels first
+        body = fit_rows(rows, budget, drop_start=not desc)
     if not body:
         body = ["nothing to show with this filter"]
-    foot = " · ".join(
-        f"{k}: {option_label(k, opts[k])}" for k in ("levels", "filter", "style") if k in opts
-    )
     return "\n".join([head, tot_line, "", *body, "", f"<i>{foot}</i>"])

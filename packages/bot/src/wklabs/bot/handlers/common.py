@@ -138,12 +138,16 @@ async def last_sync_at(ctx: AppContext, key: str) -> datetime | None:
 
 
 async def card_screen(ctx: AppContext, acc: Account) -> tuple[str, InlineKeyboardMarkup]:
+    summary = await ctx.db.current("summary").find_one(
+        {"_id": acc.key}, {"reviews_now": 1, "lessons_now": 1, "next_reviews_at": 1}
+    )
     text = texts.account_card(
         acc,
         await routes_with_chats(ctx, acc),
         last_sync=await last_sync_at(ctx, acc.key),
         tz=ZoneInfo(ctx.settings.tz),
         now=utcnow(),
+        summary=summary,
     )
     return text, kb_account_card(acc)
 

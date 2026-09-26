@@ -11,6 +11,7 @@ from bson import ObjectId
 from wklabs.bot.callbacks import ProgressCb, SessionCb
 from wklabs.bot.handlers.progress import day_start, progress_screen, user_opts
 from wklabs.bot.keyboards import kb_progress, kb_session
+from wklabs.bot.render.common import tg_len
 from wklabs.bot.render.progress import bar, render_map
 from wklabs.bot.render.session import SessionView, render_session
 from wklabs.lib.notify_settings import effective
@@ -126,9 +127,12 @@ def test_render_session_and_map():
     assert "2 reviews · ✅ 1 ❌ 1 · 50% (answers 80%) · 0.2/min" in text
     assert "⬆️ 2 ⬇️ 1 · → Guru 1 · 📖 1 lessons" in text and "⏳ due 40" in text
     assert "🩷 apprentice 1 → 2" in text
-    assert "<blockquote expandable>❌ wrong (1)\n語" in text and "G2 → 🩷A4 (m1 r0)" in text
-    assert "💜 passed (Guru): 漢" in text and "📖 lessons: 一" in text
-    assert "🗺 what changed\nL1 📖 1→0 · 🩷 0→1\nL5 🩷 0→1 · 💜 1→0\nL12 🩷 1→0 · 💜 0→1" in text
+    assert (
+        "<blockquote expandable>❌ wrong (1)\n<code>💜2→🩷4</code> 🟣 L05 語 · language (m1)"
+        in text
+    )
+    assert "💜 passed (Guru): 🔴 漢 · Chinese" in text and "📖 lessons: 🔵 一 · ground" in text
+    assert "🗺 what changed\nL01 🤍 1→0 · 🩷 0→1\nL05 🩷 0→1 · 💜 1→0\nL12 🩷 1→0 · 💜 0→1" in text
     # live: no heavy blocks, "live" marker; counts only hides the lists; ⏹ mark when user-ended
     live = render_session(
         SessionView("Vitalik", s, st, SUBJECTS, TZ, live=True), {"items": "wrong"}
@@ -140,7 +144,7 @@ def test_render_session_and_map():
     full = render_session(SessionView("V", s, st, SUBJECTS, TZ), {"items": "all", "map": True})[0]
     assert "✅ correct (1)" in full and "🗺 map" not in full  # no matrix → no map block
     full = render_session(view, {"items": "all", "map": True, "map_levels": "all"})[0]
-    assert "🗺 map\nL1 " in full
+    assert "🗺 map\nL01 " in full
     # progress map rendering
     assert bar({"apprentice": 1, "burned": 3}) == "🩷🩷🩷🔥🔥🔥🔥🔥🔥🔥"
     assert bar({}) == "▫️" * 10 and len(bar({"locked": 1, "guru": 1, "burned": 1})) == 10
@@ -149,11 +153,17 @@ def test_render_session_and_map():
     lines = text.split("\n")
     assert lines[0] == "🗺 <b>Vitalik</b> · L12 · levels 1–12 ↓ · Δ session"
     assert lines[1].startswith("🔒 2 🩷 2 💜 1") and lines[1].endswith("⏳ due 40")
+    # style both = bar line (current level in bold, no marker that shifts the bar) + counts line
+    assert lines[3] == "<b>L12</b> 💜💜💜💜💜💜💜💜💜💜 · 🩷 1→0 · 💜 0→1"
+    assert lines[4] == "<code>    🔒0 🩷0 💜1</code>"  # columns = groups present in shown levels
+    assert lines[7] == "L01 🔒🔒🔒🔒🔒🔒🔒🩷🩷🩷 · 🤍 1→0 · 🩷 0→1"
+    assert lines[-1] == "<i>filter: all · style: both</i>"
+    counts = render_map("V", 12, [1, 5, 12], after, None, normalize_options({"style": "counts"}))
     assert (
-        lines[3].startswith("L12▶︎ 💜💜💜💜💜💜💜💜💜💜 · <code>") and "🩷 1→0 · 💜 0→1" in lines[3]
+        "\nL01 <code>🔒2 🩷1 💜0</code>\nL05 <code>🔒0 🩷1 💜0</code>\n<b>L12</b> <code>" in counts
     )
     stage = render_map("V", 12, [1, 5, 12], after, before, normalize_options({"group": "stage"}))
-    assert "🩷 <b>Apprentice</b> 2 (+1): L1 0→1 · L5 0→1 · L12 1→0" in stage
+    assert "🩷 <b>Apprentice</b> 2 (+1): L01 0→1 · L05 0→1 · L12 1→0" in stage
     changed = render_map(
         "V", 12, [1, 5, 12], after, after, normalize_options({"filter": "changed"})
     )
@@ -161,7 +171,7 @@ def test_render_session_and_map():
     # keyboards and callback sizes
     kb = kb_progress("07fff792", opts, accounts=[], in_group=True)
     labels = [b.text for row in kb.inline_keyboard for b in row]
-    assert labels[0] == "levels: current -5" and labels[-1] == "🧹 Close"
+    assert labels[1] == "• now-5" and labels[-1] == "🧹 Close"
     assert len(SessionCb(id="0" * 24, action="end").pack().encode()) <= 64
     assert len(ProgressCb(key="07fff792", opt="levels").pack().encode()) <= 64
     labels = [b.text for row in kb_session(ObjectId(), live=True).inline_keyboard for b in row]
@@ -294,9 +304,17 @@ async def test_progress_screen_and_prefs(db):
     opts = user_opts(user, acc.key)
     text, kb = await progress_screen(ctx, user, acc, opts, in_group=False)
     assert text.startswith("🗺 <b>Vitalik</b> · L12 · levels 12–12 ↑ · Δ session 17:52")
-    assert "L12▶︎ 💜💜💜💜💜💜💜💜💜💜 · 🩷 1→0 · 💜 0→1" in text and "⏳ due 1" in text
+    assert "<b>L12</b> 💜💜💜💜💜💜💜💜💜💜 · 🩷 1→0 · 💜 0→1" in text and "⏳ due 1" in text
     labels = [b.text for row in kb.inline_keyboard for b in row]
-    assert labels[0] == "levels: current -5" and "🧹 Close" not in labels
+    assert labels[:5] == ["now-3", "• now-5", "now-10", "1…now", "all"] and "🧹 Close" not in labels
+    assert labels[5:11] == [
+        "sort: ↑",
+        "group: level",
+        "filter: all",
+        "style: emoji",
+        "Δ: session",
+        "🔄",
+    ]
     opts["levels"], opts["diff"] = "all", "week"
     text, _ = await progress_screen(ctx, user, acc, opts, in_group=True)
     assert "levels 1–12" in text and "Δ 7 days" in text
@@ -305,3 +323,15 @@ async def test_progress_screen_and_prefs(db):
     fresh = await ctx.users.get(42)
     assert fresh and user_opts(fresh, acc.key)["sort"] == "desc"
     assert cast(Bot, bot) is not None
+
+
+def test_map_trims_to_the_telegram_limit():
+    after = {
+        (lvl, "vocabulary", st): 100 for lvl in range(1, 61) for st in (LOCKED, 0, 1, 5, 7, 8, 9)
+    }
+    levels = list(range(1, 61))
+    text = render_map("V", 60, levels, after, None, normalize_options({"style": "both"}))
+    assert tg_len(text) <= 4096 and "levels don't fit" in text
+    assert "<b>L60</b>" in text and "\nL01 " not in text  # ascending: far (low) levels go first
+    text = render_map("V", 60, levels, after, None, normalize_options({"style": "emoji"}))
+    assert "don't fit" not in text and "\nL01 " in text  # 60 bars fit as they are

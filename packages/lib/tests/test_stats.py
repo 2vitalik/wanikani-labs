@@ -15,6 +15,7 @@ from wklabs.lib.progress import (
     total_counts,
 )
 from wklabs.lib.stats import window_stats
+from wklabs.lib.subjects import level_tag, subject_label
 
 T0 = datetime(2026, 9, 13, 17, 52, tzinfo=UTC)
 SUBJECTS = {
@@ -128,6 +129,10 @@ async def test_matrix_and_reverse_apply(db):
         2,
     ]
     assert pick_levels([1, 2, 3], 2, "all") == [1, 2, 3]
+    assert pick_levels([1, 2, 3, 4, 5, 6], 4, "to_current") == [1, 2, 3, 4]
+    assert level_tag(1) == "L01" and level_tag(40) == "L40" and level_tag(None) == "L??"
+    subj = {"_id": 1, "characters": "漢", "type": "kanji", "level": 12, "item": {"data": {}}}
+    assert subject_label(subj) == "漢" and subject_label(None, 7, "kanji") == "#7 (kanji)"
     opts = normalize_options({"sort": "desc", "levels": "bogus", "nope": 1})
     assert opts["sort"] == "desc" and opts["levels"] == "around5" and "nope" not in opts
     assert next_option("sort", "asc") == "desc" and next_option("sort", "desc") == "asc"

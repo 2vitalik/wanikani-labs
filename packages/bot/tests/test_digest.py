@@ -68,16 +68,34 @@ def test_reviews_digest():
     assert "2 reviews: ✅ 1 · ❌ 1 · ⬆️ 1 · ⬇️ 1" in text
     assert "🔓 1 unlocked" in text
     lines = text.split("\n")
-    # wrong answers listed first
+    # wrong answers first; status token in monospace, then type mark, level, link, misses
     assert (
-        lines[1].startswith("❌")
-        and "水曜日" in lines[1]
-        and "Guru II → 🩷Apprentice IV" in lines[1]
+        lines[1].startswith("<code>💜2→🩷4</code> 🟣 L05 <a")
+        and "水曜日 · Wednesday</a> (m1)" in lines[1]
     )
-    assert "(m1 r0)" in lines[1]
-    assert lines[2].startswith("✅") and "Apprentice IV → 💜Guru I" in lines[2]
+    assert lines[2].startswith("<code>🩷4→💜1</code> 🔴 L05 <a") and lines[2].endswith(
+        "火 · Fire</a>"
+    )
     assert 'href="https://www.wanikani.com/kanji/火"' in text
-    assert "🔓 unlocked: " in lines[3] and "一" in lines[3]
+    assert (
+        lines[3] == '🔓 unlocked: 🔵 <a href="https://www.wanikani.com/radical/一">一 · Ground</a>'
+    )
+
+
+def test_reviews_digest_groups_same_move():
+    events = [
+        ev("reviewed", 1, count=1, meaning_wrong=0, reading_wrong=0, correct=True),
+        ev("srs_up", 1, from_stage=4, to_stage=5),
+        ev("reviewed", 2, count=1, meaning_wrong=0, reading_wrong=0, correct=True),
+        ev("srs_up", 2, from_stage=4, to_stage=5),
+        ev("reviewed", 3, count=1, meaning_wrong=1, reading_wrong=0, correct=False),
+    ]
+    lines = render("live", "main", events, SUBJECTS, TZ)[0].split("\n")
+    # the miss without an SRS move = stayed at Apprentice 1; it goes first
+    assert lines[1].startswith("<code>🩷1→🩷1</code> 🔵 L01 ") and lines[1].endswith("(m1)")
+    # two identical moves collapse under one header, items sorted by level then id
+    assert lines[2] == "<code>🩷4→💜1</code> · 2"
+    assert lines[3].startswith("🔴 L05 <a") and lines[4].startswith("🟣 L05 <a")
 
 
 def test_milestones_and_subjects():
@@ -106,5 +124,5 @@ def test_long_digest_splits_and_truncates():
         e["subject_type"] = "vocabulary"
     msgs = render("live", "main", events, many, TZ)
     assert all(len(m) <= 4096 for m in msgs)
-    assert "… +139 more" in msgs[-1]  # MAX_LINES = 60
+    assert "… +140 more" in msgs[-1]  # MAX_LINES = 60 (one line is the `✅ · 199` group header)
     assert all(m.startswith("📝 <b>main</b>") for m in msgs)

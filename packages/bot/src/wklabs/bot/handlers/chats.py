@@ -11,6 +11,7 @@ import logging
 
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatType
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
@@ -427,11 +428,16 @@ async def cb_forget(
 @router.callback_query(NavCb.filter(F.screen == "addchat"))
 async def cb_addchat(cb: CallbackQuery) -> None:
     msg = cb.message
-    if isinstance(msg, Message) and msg.chat.type == ChatType.PRIVATE:
-        await msg.answer(texts.pick_chat(), reply_markup=kb_pick_chat())
-        await cb.answer()
-    else:
+    if not (isinstance(msg, Message) and msg.chat.type == ChatType.PRIVATE):
         await cb.answer("open me in private for that", show_alert=True)
+        return
+    try:
+        await msg.answer(texts.pick_chat(), reply_markup=kb_pick_chat())
+    except TelegramAPIError as exc:
+        # a refused reply keyboard used to leave the button spinning with no message (T38 §6)
+        log.exception("chat picker refused by Telegram")
+        await msg.answer(texts.pick_failed(exc.message), reply_markup=kb_back_chats())
+    await cb.answer()
 
 
 @router.message(F.chat_shared, F.chat.type == ChatType.PRIVATE)
