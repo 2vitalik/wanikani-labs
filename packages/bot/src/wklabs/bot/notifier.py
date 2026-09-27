@@ -135,17 +135,30 @@ class Notifier:
             subject_ids = {int(e["subject_id"]) for e in evs if e.get("subject_id") is not None}
             subjects = await load_subjects(self.db, subject_ids)
             label = labels.get(account, account) if account else None
-            rendered: dict[str, list[str]] = {}
+            rendered: dict[tuple[str, str, bool], list[str]] = {}
             for route in routes:
                 todo = [e for e in evs if route.id not in (e.get("delivered") or [])]
                 if not todo:
                     continue
                 opts = effective(route)
-                items = str(opts.get("items", "all"))
-                if items not in rendered:
-                    rendered[items] = render(kind, label, evs, subjects, self.tz, items=items)
+                view = (
+                    str(opts.get("items", "all")),
+                    str(opts.get("sort", "stage_asc")),
+                    bool(opts.get("group", True)),
+                )
+                if view not in rendered:
+                    rendered[view] = render(
+                        kind,
+                        label,
+                        evs,
+                        subjects,
+                        self.tz,
+                        items=view[0],
+                        sort=view[1],
+                        group=view[2],
+                    )
                 msg_ids = await self.send_route(
-                    route, rendered[items], silent=bool(opts.get("silent"))
+                    route, rendered[view], silent=bool(opts.get("silent"))
                 )
                 await self.db.events.update_many(
                     {"_id": {"$in": [e["_id"] for e in todo]}},
@@ -255,7 +268,7 @@ class Notifier:
                 await self.sessions.mark_delivered(session.id, route.id)  # too small: no message
                 continue
             texts_ = render_session(view, opts)
-            kb = kb_session(session.id, live=not final)
+            kb = kb_session(session.id, live=not final, route_id=route.id, opts=opts)
             ids = await self.send_or_edit(
                 route,
                 session.key,
@@ -289,9 +302,42 @@ class Notifier:
             route,
             render_session(view, opts),
             silent=True,
-            reply_markup=kb_session(recent[0].id, live=False),
+            reply_markup=kb_session(recent[0].id, live=False, route_id=route.id, opts=opts),
         )
         return None if ids or self.dry_run else "send failed"
+
+    async def rerender_session(
+        self, session: Session, route: Route, message_id: int
+    ) -> tuple[str, InlineKeyboardMarkup]:
+        """The session message again with the route's current settings (view buttons).
+
+        A message the report knows keeps its hash in sync, so the next pass does not edit it
+        once more; any other message showing this session is a preview."""
+        opts = effective(route)
+        rep = await self.reports.get(route.id, session.key)
+        mine = rep is not None and message_id in rep.message_ids
+        labels = await self.accounts.labels()
+        view = await self.build_view(
+            session,
+            labels.get(session.account, session.account),
+            need_map=bool(opts.get("changes") or opts.get("map")),
+            live=session.is_open,
+            preview=not mine,
+        )
+        texts_ = render_session(view, opts)
+        if rep is not None and mine:
+            await self.reports.upsert(
+                route.id,
+                session.key,
+                chat_id=rep.chat_id,
+                thread_id=rep.thread_id,
+                message_ids=rep.message_ids,
+                final=rep.final,
+                text_hash=text_hash(texts_),
+                dry_run=rep.dry_run,
+            )
+        kb = kb_session(session.id, live=session.is_open, route_id=route.id, opts=opts)
+        return texts_[0], kb
 
     # ------------------------------------------------------------- send
     async def send_or_edit(

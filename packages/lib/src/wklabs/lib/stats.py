@@ -54,6 +54,7 @@ class Item:
     burned: bool = False
     passed: bool = False
     resurrected: bool = False
+    at: datetime | None = None  # last review (or first event)
 
     @property
     def wrong(self) -> bool:
@@ -178,7 +179,9 @@ def window_stats(events: list[Json], subjects: dict[int, Json] | None = None) ->
         sid = int(sid)
         it = items.get(sid)
         if it is None:
-            it = items[sid] = Item(sid, ev.get("subject_type"), _level(subjects, sid))
+            it = items[sid] = Item(
+                sid, ev.get("subject_type"), _level(subjects, sid), at=ev.get("at")
+            )
         return it
 
     for ev in sorted(events, key=lambda e: e["at"]):
@@ -199,6 +202,7 @@ def window_stats(events: list[Json], subjects: dict[int, Json] | None = None) ->
                 n = int(meta.get("count") or 1)
                 mw, rw = int(meta.get("meaning_wrong") or 0), int(meta.get("reading_wrong") or 0)
                 it.count += n
+                it.at = at
                 it.meaning_wrong += mw
                 it.reading_wrong += rw
                 it.correct = (it.correct is not False) and bool(meta.get("correct", mw + rw == 0))

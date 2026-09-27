@@ -20,7 +20,7 @@ SubjectIndex = dict[int, tuple[int, str]]  # subject id → (level, type)
 
 GROUPS: tuple[tuple[str, str], ...] = (
     ("locked", "🔒"),
-    ("lesson", "🤍"),  # unlocked, lesson not taken yet: an "empty" heart
+    ("lesson", "🥚"),  # unlocked, lesson not taken yet
     ("apprentice", "🩷"),
     ("guru", "💜"),
     ("master", "💙"),

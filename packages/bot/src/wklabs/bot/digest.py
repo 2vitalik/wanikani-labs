@@ -7,7 +7,15 @@ from html import escape
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .render.common import chunk, grouped, miss_detail, move_token, subject_of, when
+from .render.common import (
+    chunk,
+    grouped,
+    miss_detail,
+    move_token,
+    order_key,
+    subject_of,
+    when,
+)
 
 Json = dict[str, Any]
 _subject, _when, _chunk = subject_of, when, chunk
@@ -21,8 +29,11 @@ def render_reviews(
     tz: ZoneInfo,
     *,
     items: str = "all",
+    sort: str = "stage_asc",
+    group: bool = True,
 ) -> list[str]:
-    """`items`: all · wrong (only ❌ and SRS drops) · none (header with counts only)."""
+    """`items`: all · wrong (only ❌ and SRS drops) · none (header with counts only);
+    `sort`/`group`: order of the lines and grouping of same SRS moves."""
     by_subject: dict[int, dict[str, Json]] = defaultdict(dict)
     unlocked: list[Json] = []
     started: list[Json] = []
@@ -58,8 +69,8 @@ def render_reviews(
         parts.append(f"🔓 {len(unlocked)} unlocked")
     header = " — ".join(parts)
 
-    # wrong ones first, then by SRS stage (highest first); same-move items collapse into a group
-    rows: list[tuple[tuple[int, int, int, int], str, str]] = []
+    # misses first (except in time order), then the chosen order; same moves form a group
+    rows: list[tuple[tuple[float, ...], str, str]] = []
     for sid, g in by_subject.items():
         rv = g.get("reviewed")
         mv = g.get("srs_up") or g.get("srs_down")
@@ -77,19 +88,18 @@ def render_reviews(
             fs = ts = None
         token = move_token(fs, ts) if fs is not None else ("✅" if correct else "•")
         line = _subject(ev, subjects)
+        mw = int(rv["meta"].get("meaning_wrong") or 0) if rv else 0
+        rw = int(rv["meta"].get("reading_wrong") or 0) if rv else 0
         if rv and not correct:
-            line += miss_detail(
-                rv["meta"].get("meaning_wrong", 0), rv["meta"].get("reading_wrong", 0)
-            )
-        key = (
-            0 if bad else 1,
-            -(fs if fs is not None else -1),
-            -(ts if ts is not None else -1),
-            sid,
+            line += miss_detail(mw, rw)
+        subj = subjects.get(sid) or {}
+        key = order_key(
+            sort, frm=fs, to=ts, misses=mw + rw, at=ev.get("at"), level=subj.get("level"), sid=sid
         )
-        rows.append((key, token, line))
+        first = () if sort == "time" else (0.0 if bad else 1.0,)
+        rows.append(((*first, *key), token, line))
     rows.sort(key=lambda r: r[0])
-    lines = grouped([(token, line) for _, token, line in rows])
+    lines = grouped([(token, line) for _, token, line in rows], collapse=group)
     if started and items == "all":
         lines.append(
             "📖 lessons: "
@@ -171,11 +181,15 @@ def render(
     tz: ZoneInfo,
     *,
     items: str = "all",
+    sort: str = "stage_asc",
+    group: bool = True,
 ) -> list[str]:
     if kind == "subjects":
         return render_subjects(events, subjects, tz)
     if kind == "live":
-        return render_reviews(label or "?", events, subjects, tz, items=items)
+        return render_reviews(
+            label or "?", events, subjects, tz, items=items, sort=sort, group=group
+        )
     if kind == "milestones":
         return render_milestones(label or "?", events, subjects, tz)
     return []

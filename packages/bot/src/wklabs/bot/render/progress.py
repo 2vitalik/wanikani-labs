@@ -20,6 +20,8 @@ from .common import MAX_LEN, tg_len
 
 Json = dict[str, Any]
 BAR_WIDTH = 10
+BOTH_BAR_WIDTH = 6  # `both`: a shorter bar leaves room for the numbers on a phone
+CURRENT_MARK = "◂"  # plain text glyph (no emoji variant), trails the current level
 GROUP_TITLE: dict[str, str] = {
     "locked": "Locked",
     "lesson": "Lessons",
@@ -66,6 +68,11 @@ def counts_str(counts: dict[str, int], cols: list[str], widths: Widths) -> str:
     return " ".join(f"{GROUP_EMOJI[g]}{counts.get(g, 0):>{widths[g]}}" for g in cols)
 
 
+def numbers_str(counts: dict[str, int], cols: list[str], widths: Widths) -> str:
+    """`12  3 40` — the same columns without emoji (the totals line is the legend)."""
+    return " ".join(f"{counts.get(g, 0):>{widths[g]}}" for g in cols)
+
+
 def diff_str(before: dict[str, int], after: dict[str, int]) -> str:
     parts = [
         f"{GROUP_EMOJI[g]} {before.get(g, 0)}→{after.get(g, 0)}"
@@ -91,18 +98,24 @@ def level_line(
     cols: list[str],
     widths: Widths,
 ) -> list[str]:
-    """One level: 1 line for `emoji`/`counts`, 2 for `both` (bar, then the counts row)."""
+    """One level, one line: bar (`emoji`), counts table (`counts`) or short bar │ numbers
+    (`both`); then the diff, then the current-level mark."""
     head = level_head(level, current)
-    tail = ""
+    if style == "counts":
+        body = f"<code>{counts_str(after, cols, widths)}</code>"
+    elif style == "both":
+        numbers = numbers_str(after, cols, widths)
+        body = f"{bar(after, BOTH_BAR_WIDTH)} <code>│ {numbers}</code>"
+    else:
+        body = bar(after)
+    line = f"{head} {body}"
     if before is not None:
         d = diff_str(before, after)
-        tail = f" · {d}" if d else ""
-    if style == "counts":
-        return [f"{head} <code>{counts_str(after, cols, widths)}</code>{tail}"]
-    lines = [f"{head} {bar(after)}{tail}"]
-    if style == "both":
-        lines.append(f"<code>    {counts_str(after, cols, widths)}</code>")
-    return lines
+        if d:
+            line += f" · {d}"
+    if level == current:
+        line += f" {CURRENT_MARK}"
+    return [line]
 
 
 def level_rows(

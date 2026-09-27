@@ -34,8 +34,30 @@ def stage_token(n: int | None) -> str:
 
 
 def move_token(frm: int | None, to: int | None) -> str:
-    """`🩷3→🩷4` in monospace — the fixed-width status that opens an item line."""
-    return f"<code>{stage_token(frm)}→{stage_token(to)}</code>"
+    """`🩷3 → 🩷4`: stages in monospace (fixed width), the arrow in the normal font."""
+    return f"<code>{stage_token(frm)}</code> → <code>{stage_token(to)}</code>"
+
+
+def order_key(
+    sort: str,
+    *,
+    frm: int | None,
+    to: int | None,
+    misses: int,
+    at: datetime | None,
+    level: int | None,
+    sid: int,
+) -> tuple[float, ...]:
+    """Sort key of an item line: stage ↑ (default) · stage ↓ · misses · time."""
+    f = frm if frm is not None else -1
+    t = to if to is not None else -1
+    if sort == "stage_desc":
+        return (-f, -t, level or 0, sid)
+    if sort == "misses":
+        return (-misses, f, t, level or 0, sid)
+    if sort == "time":
+        return (at.timestamp() if at else 0.0, sid)
+    return (f, t, level or 0, sid)
 
 
 def miss_detail(meaning_wrong: int, reading_wrong: int) -> str:
@@ -71,23 +93,22 @@ def subject_of(ev: Json, subjects: dict[int, Json], *, level: bool = True) -> st
     return subject_ref(ev.get("subject_id"), ev.get("subject_type"), subjects, level=level)
 
 
-def grouped(rows: list[tuple[str, str]]) -> list[str]:
-    """Rows are (token, line), already sorted by token. A run of the same token collapses under
-    one header `token · n`; a lone row keeps its token inline (T38 §1)."""
+def grouped(rows: list[tuple[str, str]], *, collapse: bool = True) -> list[str]:
+    """Rows are (token, line) in display order. Rows sharing a token collapse under one header
+    `token · n` (placed where the token first appears); a lone row keeps its token inline.
+    `collapse=False`: every row inline (T38 §1, T40)."""
+    if not collapse:
+        return [f"{token} {line}" for token, line in rows]
+    buckets: dict[str, list[str]] = {}
+    for token, line in rows:
+        buckets.setdefault(token, []).append(line)
     out: list[str] = []
-    i = 0
-    while i < len(rows):
-        token = rows[i][0]
-        j = i
-        while j < len(rows) and rows[j][0] == token:
-            j += 1
-        run = rows[i:j]
-        if len(run) == 1:
-            out.append(f"{token} {run[0][1]}")
+    for token, lines in buckets.items():
+        if len(lines) == 1:
+            out.append(f"{token} {lines[0]}")
         else:
-            out.append(f"{token} · {len(run)}")
-            out.extend(line for _, line in run)
-        i = j
+            out.append(f"{token} · {len(lines)}")
+            out.extend(lines)
     return out
 
 

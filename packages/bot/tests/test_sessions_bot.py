@@ -6,16 +6,23 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from aiogram import Bot
+from aiogram.types import CallbackQuery
 from bson import ObjectId
 
-from wklabs.bot.callbacks import ProgressCb, SessionCb
-from wklabs.bot.handlers.progress import day_start, progress_screen, user_opts
+from wklabs.bot.callbacks import ProgressCb, SessionCb, ViewCb
+from wklabs.bot.handlers.progress import (
+    cb_session_view,
+    day_start,
+    progress_screen,
+    user_opts,
+)
 from wklabs.bot.keyboards import kb_progress, kb_session
 from wklabs.bot.render.common import tg_len
 from wklabs.bot.render.progress import bar, render_map
 from wklabs.bot.render.session import SessionView, render_session
 from wklabs.lib.notify_settings import effective
 from wklabs.lib.progress import LOCKED, normalize_options
+from wklabs.lib.reports import text_hash
 from wklabs.lib.sessions import BY_USER, Session
 from wklabs.lib.stats import window_stats
 from wklabs.lib.users import TgUser
@@ -127,12 +134,10 @@ def test_render_session_and_map():
     assert "2 reviews · ✅ 1 ❌ 1 · 50% (answers 80%) · 0.2/min" in text
     assert "⬆️ 2 ⬇️ 1 · → Guru 1 · 📖 1 lessons" in text and "⏳ due 40" in text
     assert "🩷 apprentice 1 → 2" in text
-    assert (
-        "<blockquote expandable>❌ wrong (1)\n<code>💜2→🩷4</code> 🟣 L05 語 · language (m1)"
-        in text
-    )
+    down = "<code>💜2</code> → <code>🩷4</code>"
+    assert f"<blockquote expandable>❌ wrong (1)\n{down} 🟣 L05 語 · language (m1)" in text
     assert "💜 passed (Guru): 🔴 漢 · Chinese" in text and "📖 lessons: 🔵 一 · ground" in text
-    assert "🗺 what changed\nL01 🤍 1→0 · 🩷 0→1\nL05 🩷 0→1 · 💜 1→0\nL12 🩷 1→0 · 💜 0→1" in text
+    assert "🗺 what changed\nL01 🥚 1→0 · 🩷 0→1\nL05 🩷 0→1 · 💜 1→0\nL12 🩷 1→0 · 💜 0→1" in text
     # live: no heavy blocks, "live" marker; counts only hides the lists; ⏹ mark when user-ended
     live = render_session(
         SessionView("Vitalik", s, st, SUBJECTS, TZ, live=True), {"items": "wrong"}
@@ -153,10 +158,9 @@ def test_render_session_and_map():
     lines = text.split("\n")
     assert lines[0] == "🗺 <b>Vitalik</b> · L12 · levels 1–12 ↓ · Δ session"
     assert lines[1].startswith("🔒 2 🩷 2 💜 1") and lines[1].endswith("⏳ due 40")
-    # style both = bar line (current level in bold, no marker that shifts the bar) + counts line
-    assert lines[3] == "<b>L12</b> 💜💜💜💜💜💜💜💜💜💜 · 🩷 1→0 · 💜 0→1"
-    assert lines[4] == "<code>    🔒0 🩷0 💜1</code>"  # columns = groups present in shown levels
-    assert lines[7] == "L01 🔒🔒🔒🔒🔒🔒🔒🩷🩷🩷 · 🤍 1→0 · 🩷 0→1"
+    # style both = short bar │ numbers on one line; current level bold + trailing mark
+    assert lines[3] == "<b>L12</b> 💜💜💜💜💜💜 <code>│ 0 0 1</code> · 🩷 1→0 · 💜 0→1 ◂"
+    assert lines[5] == "L01 🔒🔒🔒🔒🩷🩷 <code>│ 2 1 0</code> · 🥚 1→0 · 🩷 0→1"
     assert lines[-1] == "<i>filter: all · style: both</i>"
     counts = render_map("V", 12, [1, 5, 12], after, None, normalize_options({"style": "counts"}))
     assert (
@@ -176,6 +180,13 @@ def test_render_session_and_map():
     assert len(ProgressCb(key="07fff792", opt="levels").pack().encode()) <= 64
     labels = [b.text for row in kb_session(ObjectId(), live=True).inline_keyboard for b in row]
     assert labels == ["⏹ End now", "🗺 Progress"]
+    view = {"items": "wrong", "sort": "stage_asc", "group": True}
+    kb = kb_session(ObjectId(), live=False, route_id=ObjectId(), opts=view)
+    assert [[b.text for b in row] for row in kb.inline_keyboard] == [
+        ["🗺 Progress"],
+        ["📄 wrong only", "↕️ stage ↑", "🗂 grouped"],
+    ]
+    assert len(ViewCb(s="0" * 24, r="0" * 24, opt="group").pack().encode()) <= 64
     assert (
         day_start(datetime(2026, 9, 14, 0, 30, tzinfo=UTC), TZ).day == 13
     )  # 03:30 Kyiv → yesterday 04:00
@@ -330,8 +341,75 @@ def test_map_trims_to_the_telegram_limit():
         (lvl, "vocabulary", st): 100 for lvl in range(1, 61) for st in (LOCKED, 0, 1, 5, 7, 8, 9)
     }
     levels = list(range(1, 61))
-    text = render_map("V", 60, levels, after, None, normalize_options({"style": "both"}))
+    text = render_map("V", 60, levels, after, {}, normalize_options({"style": "both"}))
     assert tg_len(text) <= 4096 and "levels don't fit" in text
     assert "<b>L60</b>" in text and "\nL01 " not in text  # ascending: far (low) levels go first
     text = render_map("V", 60, levels, after, None, normalize_options({"style": "emoji"}))
     assert "don't fit" not in text and "\nL01 " in text  # 60 bars fit as they are
+
+
+def view_click(session_id: ObjectId, route_id: ObjectId, opt: str, answered: list) -> CallbackQuery:
+    data = ViewCb(s=str(session_id), r=str(route_id), opt=opt)
+    cb = CallbackQuery.model_validate(
+        {
+            "id": "1",
+            "from": {"id": 42, "is_bot": False, "first_name": "V"},
+            "chat_instance": "x",
+            "data": data.pack(),
+            "message": {
+                "message_id": 1,
+                "date": 1,
+                "chat": {"id": 42, "type": "private", "first_name": "V"},
+                "text": "summary",
+            },
+        }
+    )
+
+    async def answer(text: object = None, **kw) -> None:
+        answered.append(text)
+
+    object.__setattr__(cb, "answer", answer)
+    return cb
+
+
+async def test_view_buttons_rerender_in_place(db):
+    bot = FakeBot()
+    ctx = make_ctx(db, bot=bot)
+    acc, route = await _account(ctx)
+    await db.events.insert_many(
+        [
+            reviewed(1, m(0)),
+            ev("srs_up", 1, m(0), from_stage=4, to_stage=5),
+            reviewed(2, m(1), correct=False),
+            ev("srs_down", 2, m(1), from_stage=6, to_stage=4),
+            reviewed(3, m(2), correct=False),
+            ev("srs_down", 3, m(2), from_stage=6, to_stage=4),
+        ]
+    )
+    await _polled(ctx, acc.key, m(30))
+    await ctx.notifier.notify_sessions()
+    down = "<code>💜2</code> → <code>🩷4</code>"
+    assert f"❌ wrong (2)\n{down} · 2\n🔵 L01 " in bot.sent[-1][2]  # grouped, low level first
+    s = (await ctx.sessions.recent(acc.key, 15))[0]
+    owner = TgUser(42, "v", "V", "en", "user", "active", m(0), m(0))
+    answered: list = []
+    cb = view_click(s.id, route.id, "group", answered)
+    data = ViewCb(s=str(s.id), r=str(route.id), opt="group")
+    await cb_session_view(cb, data, ctx, owner, cast(Bot, bot))
+    fresh = await ctx.routes.get(route.id)
+    assert fresh and effective(fresh)["group"] is False and answered == ["🗂 Group: off"]
+    chat_id, message_id, text = bot.edited[-1]
+    assert (chat_id, message_id) == (42, 1) and "preview" not in text
+    assert f"❌ wrong (2)\n{down} 🔵 L01 " in text and text.count(down) == 2
+    rep = await ctx.reports.get(route.id, s.key)
+    assert rep and rep.text_hash == text_hash([text]) and rep.final
+    assert await ctx.notifier.notify_sessions() == 0 and len(bot.edited) == 1  # no second edit
+    # not the owner → an alert, the setting stays
+    stranger = TgUser(7, "x", "X", "en", "user", "active", m(0), m(0))
+    data = ViewCb(s=str(s.id), r=str(route.id), opt="sort")
+    await cb_session_view(
+        view_click(s.id, route.id, "sort", answered), data, ctx, stranger, cast(Bot, bot)
+    )
+    fresh = await ctx.routes.get(route.id)
+    assert "only the owner" in str(answered[-1])
+    assert fresh and effective(fresh)["sort"] == "stage_asc" and len(bot.edited) == 1

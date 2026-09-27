@@ -22,6 +22,7 @@ from .common import (
     minutes,
     miss_detail,
     move_token,
+    order_key,
     pct,
     quote,
     span,
@@ -75,17 +76,31 @@ def item_token(it: Item) -> str:
     return "✅" if it.count else "•"
 
 
-def _stage_key(it: Item) -> tuple[int, int, int, int]:
-    """Highest stages first, then level and id."""
-    frm = it.from_stage if it.from_stage is not None else -1
-    to = it.to_stage if it.to_stage is not None else -1
-    return (-frm, -to, it.level or 0, it.subject_id)
+def _stages(it: Item) -> tuple[int | None, int | None]:
+    if it.moved:
+        return it.from_stage, it.to_stage
+    return (1, 1) if it.count and not it.correct else (None, None)
 
 
-def item_lines(items: list[Item], subjects: dict[int, Json]) -> list[str]:
-    """Items grouped by their SRS move: `🩷3→🩷4 · 3` + list, or inline when alone (T38 §1)."""
-    ordered = sorted(items, key=_stage_key)
-    return grouped([(item_token(it), item_line(it, subjects)) for it in ordered])
+def item_lines(items: list[Item], subjects: dict[int, Json], opts: Json) -> list[str]:
+    """Item lines in the chosen order, same SRS moves grouped under a header (T38 §1, T40)."""
+    sort = str(opts.get("sort", "stage_asc"))
+
+    def key(it: Item) -> tuple[float, ...]:
+        frm, to = _stages(it)
+        return order_key(
+            sort,
+            frm=frm,
+            to=to,
+            misses=it.meaning_wrong + it.reading_wrong,
+            at=it.at,
+            level=it.level,
+            sid=it.subject_id,
+        )
+
+    ordered = sorted(items, key=key)[:MAX_ITEMS]
+    rows = [(item_token(it), item_line(it, subjects)) for it in ordered]
+    return grouped(rows, collapse=bool(opts.get("group", True)))
 
 
 def _refs(ids: list[int], subjects: dict[int, Json], stats: Stats, limit: int = 30) -> str:
@@ -143,7 +158,7 @@ def block_wrong(view: SessionView, opts: Json) -> str | None:
     wrong = view.stats.wrong_items
     if items == "none" or not wrong:
         return None
-    return quote(f"❌ wrong ({len(wrong)})", item_lines(wrong[:MAX_ITEMS], view.subjects))
+    return quote(f"❌ wrong ({len(wrong)})", item_lines(wrong, view.subjects, opts))
 
 
 def block_all(view: SessionView, opts: Json) -> str | None:
@@ -152,8 +167,7 @@ def block_all(view: SessionView, opts: Json) -> str | None:
     ok = [it for it in view.stats.items.values() if it.count and it.correct]
     if not ok:
         return None
-    ok.sort(key=_stage_key)
-    return quote(f"✅ correct ({len(ok)})", item_lines(ok[:MAX_ITEMS], view.subjects))
+    return quote(f"✅ correct ({len(ok)})", item_lines(ok, view.subjects, opts))
 
 
 def block_wins(view: SessionView, opts: Json) -> str | None:

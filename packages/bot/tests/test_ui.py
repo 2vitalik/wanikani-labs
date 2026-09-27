@@ -156,6 +156,12 @@ def test_chat_keyboards():
     assert texts_ == ["📂 Group or forum", "👥 Chat I'm already in", "📢 Channel", "✖️ Cancel"]
     req = reply.keyboard[0][0].request_chat
     assert req and req.bot_administrator_rights and req.bot_administrator_rights.can_manage_topics
+    # Telegram refuses bot rights without the user's (USER_RIGHTS_MISSING): a superset is sent
+    mine = req.user_administrator_rights
+    assert mine and mine.can_manage_topics and mine.can_promote_members
+    channel = reply.keyboard[1][0].request_chat
+    assert channel and channel.user_administrator_rights
+    assert channel.user_administrator_rights.can_post_messages
     assert reply.keyboard[1][0].request_chat.chat_is_channel is True  # type: ignore[union-attr]
 
 

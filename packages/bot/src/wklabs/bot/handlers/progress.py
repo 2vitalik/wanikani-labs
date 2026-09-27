@@ -12,13 +12,14 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from bson import ObjectId
 from bson.errors import InvalidId
 
 from wklabs.lib.accounts import Account
+from wklabs.lib.notify_settings import BY_KEY, VIEW_KEYS, effective
 from wklabs.lib.progress import (
     PROGRESS_OPTIONS,
     current_level,
@@ -36,12 +37,12 @@ from wklabs.lib.timeutil import utcnow
 from wklabs.lib.users import TgUser
 
 from .. import texts
-from ..callbacks import ProgressCb, SessionCb
+from ..callbacks import ProgressCb, SessionCb, ViewCb
 from ..context import AppContext
 from ..keyboards import kb_progress
 from ..render.common import span
 from ..render.progress import render_map
-from .common import edit, in_group
+from .common import can_edit, edit, in_group
 
 log = logging.getLogger(__name__)
 router = Router(name="progress")
@@ -226,3 +227,35 @@ async def cb_session_map(
     text, kb = await progress_screen(ctx, user, acc, opts, in_group=in_group(cb), session=s)
     await msg.answer(text, reply_markup=kb)
     await cb.answer()
+
+
+@router.callback_query(ViewCb.filter())
+async def cb_session_view(
+    cb: CallbackQuery, callback_data: ViewCb, ctx: AppContext, user: TgUser, bot: Bot
+) -> None:
+    """📄 · ↕️ · 🗂 under a session message: next value of the route setting, same message."""
+    s = await _session(ctx, cb, callback_data.s)
+    if s is None:
+        return
+    try:
+        route = await ctx.routes.get(ObjectId(callback_data.r))
+    except InvalidId:
+        route = None
+    msg = cb.message
+    if route is None or route.account != s.account or not isinstance(msg, Message):
+        await cb.answer("notification not found", show_alert=True)
+        return
+    setting = BY_KEY.get(callback_data.opt)
+    if setting is None or setting.key not in VIEW_KEYS or not setting.applies(route.kind):
+        await cb.answer("unknown option", show_alert=True)
+        return
+    if not (await can_edit(ctx, user, route, bot=bot)).settings:
+        await cb.answer("only the owner of this notification can change its view", show_alert=True)
+        return
+    value = setting.next_value(effective(route)[setting.key])
+    await ctx.routes.set_setting(route.id, setting.key, value, by=user.id)
+    fresh = await ctx.routes.get(route.id)
+    assert fresh is not None
+    text, kb = await ctx.notifier.rerender_session(s, fresh, msg.message_id)
+    await ctx.notifier.edit_one(msg.chat.id, msg.message_id, text, kb)  # no link previews
+    await cb.answer(setting.display(value))

@@ -70,12 +70,12 @@ def test_reviews_digest():
     lines = text.split("\n")
     # wrong answers first; status token in monospace, then type mark, level, link, misses
     assert (
-        lines[1].startswith("<code>💜2→🩷4</code> 🟣 L05 <a")
+        lines[1].startswith("<code>💜2</code> → <code>🩷4</code> 🟣 L05 <a")
         and "水曜日 · Wednesday</a> (m1)" in lines[1]
     )
-    assert lines[2].startswith("<code>🩷4→💜1</code> 🔴 L05 <a") and lines[2].endswith(
-        "火 · Fire</a>"
-    )
+    assert lines[2].startswith("<code>🩷4</code> → <code>💜1</code> 🔴 L05 <a") and lines[
+        2
+    ].endswith("火 · Fire</a>")
     assert 'href="https://www.wanikani.com/kanji/火"' in text
     assert (
         lines[3] == '🔓 unlocked: 🔵 <a href="https://www.wanikani.com/radical/一">一 · Ground</a>'
@@ -92,10 +92,21 @@ def test_reviews_digest_groups_same_move():
     ]
     lines = render("live", "main", events, SUBJECTS, TZ)[0].split("\n")
     # the miss without an SRS move = stayed at Apprentice 1; it goes first
-    assert lines[1].startswith("<code>🩷1→🩷1</code> 🔵 L01 ") and lines[1].endswith("(m1)")
+    stay = "<code>🩷1</code> → <code>🩷1</code>"
+    up = "<code>🩷4</code> → <code>💜1</code>"
+    assert lines[1].startswith(f"{stay} 🔵 L01 ") and lines[1].endswith("(m1)")
     # two identical moves collapse under one header, items sorted by level then id
-    assert lines[2] == "<code>🩷4→💜1</code> · 2"
+    assert lines[2] == f"{up} · 2"
     assert lines[3].startswith("🔴 L05 <a") and lines[4].startswith("🟣 L05 <a")
+    # group off: every line carries its own status; stage ↓ without the misses-first rule
+    flat = render("live", "main", events, SUBJECTS, TZ, group=False)[0].split("\n")
+    assert [ln.split(" 🔵")[0].split(" 🔴")[0].split(" 🟣")[0] for ln in flat[1:]] == [
+        stay,
+        up,
+        up,
+    ]
+    late = render("live", "main", events, SUBJECTS, TZ, sort="time", group=False)
+    assert late[0].split("\n")[1].startswith(f"{up} 🔴")  # same instant → by subject id
 
 
 def test_milestones_and_subjects():

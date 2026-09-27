@@ -25,16 +25,18 @@ def route(kind: str = "live", settings: dict | None = None) -> Route:
 
 
 def test_registry_and_effective():
-    assert [s.key for s in for_kind("live")] == ["silent", "items"]
+    assert [s.key for s in for_kind("live")] == ["silent", "items", "sort", "group"]
+    assert [s.key for s in for_kind("live", level=1)] == ["silent", "items"]
     assert [s.key for s in for_kind("milestones")] == ["silent"]
     assert [s.key for s in for_kind("session", level=1)] == ["silent", "items", "gap", "live"]
     assert "min_items" in [s.key for s in for_kind("session", level=2)]
-    assert effective(route()) == {"silent": False, "items": "all"}
+    view = {"sort": "stage_asc", "group": True}
+    assert effective(route()) == {"silent": False, "items": "all", **view}
     assert effective(route("session"))["items"] == "wrong"  # default depends on the kind
     assert effective(route("session"))["gap"] == 15 and effective(route("session"))["live"] is True
     r = route(settings={"items": "wrong", "silent": "yes", "bogus": 1})  # invalid types ignored
-    assert effective(r) == {"silent": False, "items": "wrong"}
-    assert effective(route(), {"silent": True}) == {"silent": True, "items": "all"}
+    assert effective(r) == {"silent": False, "items": "wrong", **view}
+    assert effective(route(), {"silent": True}) == {"silent": True, "items": "all", **view}
     assert effective(route(settings={"silent": False}), {"silent": True})["silent"] is False
     assert effective(route("session", {"gap": 500}))["gap"] == 15  # out of range → default
     assert effective(route("session", {"gap": True}))["gap"] == 15  # bool is not an int here

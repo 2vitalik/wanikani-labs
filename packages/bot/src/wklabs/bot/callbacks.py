@@ -26,6 +26,14 @@ class SessionCb(CallbackData, prefix="ss"):
     action: str = "end"  # end map
 
 
+class ViewCb(CallbackData, prefix="sv"):
+    """View buttons under a session message: cycle a route setting, re-render in place."""
+
+    s: str  # session ObjectId hex
+    r: str  # route ObjectId hex
+    opt: str  # items sort group
+
+
 class ProgressCb(CallbackData, prefix="pg"):
     """`/progress` screen: cycle an option, switch account, refresh, close."""
 

@@ -81,6 +81,30 @@ ITEMS = Setting(
     choices=(("all", "all"), ("wrong", "wrong only"), ("none", "counts only")),
     kinds=("live", "session"),
 )
+SORT = Setting(
+    "sort",
+    CHOICE,
+    "stage_asc",
+    "↕️ Sort",
+    "sort — item lists by SRS stage (↑ low first), misses or time",
+    choices=(
+        ("stage_asc", "stage ↑"),
+        ("stage_desc", "stage ↓"),
+        ("misses", "misses"),
+        ("time", "time"),
+    ),
+    kinds=("live", "session"),
+    level=2,
+)
+GROUP = Setting(
+    "group",
+    BOOL,
+    True,
+    "🗂 Group",
+    "group — same SRS moves under one header",
+    kinds=("live", "session"),
+    level=2,
+)
 GAP = Setting(
     "gap",
     INT,
@@ -156,6 +180,8 @@ MAP_STYLE = Setting(
 SETTINGS: tuple[Setting, ...] = (
     SILENT,
     ITEMS,
+    SORT,
+    GROUP,
     GAP,
     LIVE,
     MIN_ITEMS,
@@ -168,6 +194,7 @@ SETTINGS: tuple[Setting, ...] = (
     MAP_STYLE,
 )
 BY_KEY = {s.key: s for s in SETTINGS}
+VIEW_KEYS: tuple[str, ...] = ("items", "sort", "group")  # buttons under a session message
 
 
 def for_kind(kind: str, level: int | None = None) -> list[Setting]:

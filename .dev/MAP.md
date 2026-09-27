@@ -2,7 +2,7 @@
 
 <!-- автоген: `dev map` (або `dev gen`), руками не редагувати -->
 
-Наступний вільний ID: **T40** · тікетів: 39 · дерево вузлів — [TREE.md](TREE.md)
+Наступний вільний ID: **T41** · тікетів: 40 · дерево вузлів — [TREE.md](TREE.md)
 
 Типи: `Q`❓ питання · `P`💡 пропозиція · `C`🔆 clarification · `B`🧠 brainstorm · `R`✔️ readback · `S`📝 summary · `D`🗄️ digest (на пенсії) · ⚙️ задача (тека, без літери). state: 🟢/🔴 — чи чекає твоєї відповіді · 🟩/⬜ — чи інтегровано в README вузла.
 
@@ -46,4 +46,5 @@
 | — | [T36](.t/T36-Q--sessions-questions.md) | ❓ | sessions-questions | Питання до дизайну сесій, нотифікацій і карти прогресу (критичні позначено) | 🔴 ⬜ |
 | — | [T37](.t/T37--sessions-pilot/plan.md) | ⚙️ | sessions-pilot | Сесії та нотифікації — пілот (сесії, підсумок, карта, картка) — план | 🟢 ⬜ |
 | — | [T38](.t/T38-C--pilot-feedback-1.md) | 🔆 | pilot-feedback-1 | Правки з живого прогону пілота: формат ревʼю, /progress, /status, картки, баги | 🟢 ⬜ |
-| — | [T39](.t/T39-Q--pilot-feedback-questions.md) | ❓ | pilot-feedback-questions | Питання по правках з живого прогону пілота | 🔴 ⬜ |
+| — | [T39](.t/T39-Q--pilot-feedback-questions.md) | ❓ | pilot-feedback-questions | Питання по правках з живого прогону пілота | 🟢 ⬜ |
+| — | [T40](.t/T40-R--pilot-feedback-answers.md) | ✔️ | pilot-feedback-answers | Відповіді на T39 (раунд 1): що зрозумів і що зроблено | 🟢 ⬜ |

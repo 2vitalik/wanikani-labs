@@ -23,7 +23,7 @@ from wklabs.lib.delivery import (
     PRESETS,
     Route,
 )
-from wklabs.lib.notify_settings import Setting
+from wklabs.lib.notify_settings import BY_KEY, VIEW_KEYS, Setting
 from wklabs.lib.progress import LEVELS_CHOICES, PROGRESS_OPTIONS, option_label
 from wklabs.lib.users import ACTIVE as U_ACTIVE
 from wklabs.lib.users import BLOCKED, PENDING, TgUser
@@ -38,6 +38,7 @@ from .callbacks import (
     SessionCb,
     TargetCb,
     TopicCb,
+    ViewCb,
 )
 from .texts import chat_icon
 
@@ -247,14 +248,38 @@ def kb_route_more(route: Route, settings: list[tuple[Setting, object]]) -> Inlin
     return b.as_markup()
 
 
-def kb_session(session_id: ObjectId, *, live: bool) -> InlineKeyboardMarkup:
-    """Under a session message: ⏹ while it is open, 🗺 always (T34 §4.7)."""
+def view_button_text(key: str, value: object) -> str:
+    if key == "group":
+        return "🗂 grouped" if value else "🗂 flat"
+    icon = "📄" if key == "items" else "↕️"
+    return f"{icon} {BY_KEY[key].shown(value)}"
+
+
+def kb_session(
+    session_id: ObjectId,
+    *,
+    live: bool,
+    route_id: ObjectId | None = None,
+    opts: dict[str, object] | None = None,
+) -> InlineKeyboardMarkup:
+    """Under a session message: ⏹ while it is open, 🗺 always (T34 §4.7); with a route — the
+    view row: items · sort · group cycle the route's settings and re-render in place (T40)."""
     b = InlineKeyboardBuilder()
     sid = str(session_id)
     if live:
         b.button(text="⏹ End now", callback_data=SessionCb(id=sid, action="end"))
     b.button(text="🗺 Progress", callback_data=SessionCb(id=sid, action="map"))
     b.adjust(2)
+    if route_id is not None and opts is not None:
+        view = InlineKeyboardBuilder()
+        for key in VIEW_KEYS:
+            if key in opts:
+                view.button(
+                    text=view_button_text(key, opts[key]),
+                    callback_data=ViewCb(s=sid, r=str(route_id), opt=key),
+                )
+        view.adjust(3)
+        b.attach(view)
     return b.as_markup()
 
 
@@ -533,6 +558,10 @@ def kb_pick_chat() -> ReplyKeyboardMarkup:
         can_manage_topics=True,
     )
     channel = admin.model_copy(update={"can_manage_topics": False, "can_post_messages": True})
+    # Telegram: bot rights must be a subset of the *user's* required rights, which therefore
+    # must be sent too (else USER_RIGHTS_MISSING); adding an admin needs can_promote_members
+    admin_user = admin.model_copy(update={"can_promote_members": True})
+    channel_user = channel.model_copy(update={"can_promote_members": True})
     rows = [
         [
             KeyboardButton(
@@ -540,6 +569,7 @@ def kb_pick_chat() -> ReplyKeyboardMarkup:
                 request_chat=KeyboardButtonRequestChat(
                     request_id=PICK_ADMIN,
                     chat_is_channel=False,
+                    user_administrator_rights=admin_user,
                     bot_administrator_rights=admin,
                     request_title=True,
                 ),
@@ -560,6 +590,7 @@ def kb_pick_chat() -> ReplyKeyboardMarkup:
                 request_chat=KeyboardButtonRequestChat(
                     request_id=PICK_CHANNEL,
                     chat_is_channel=True,
+                    user_administrator_rights=channel_user,
                     bot_administrator_rights=channel,
                     request_title=True,
                 ),
